@@ -588,7 +588,7 @@ func (hs *HTTPServer) setIndexViewData(c *models.ReqContext) (*dtos.IndexViewDat
 		NewGrafanaVersion:       hs.updateChecker.LatestGrafanaVersion(),
 		NewGrafanaVersionExists: hs.updateChecker.GrafanaUpdateAvailable(),
 		AppName:                 setting.ApplicationName,
-		AppNameBodyClass:        getAppNameBodyClass(hs.License.HasValidLicense()),
+		AppNameBodyClass:        "app-grafana",
 		FavIcon:                 "public/img/fav32.png",
 		AppleTouchIcon:          "public/img/apple-touch-icon.png",
 		AppTitle:                "Grafana",
@@ -656,12 +656,4 @@ func (hs *HTTPServer) NotFoundHandler(c *models.ReqContext) {
 	}
 
 	c.HTML(404, "index", data)
-}
-
-func getAppNameBodyClass(validLicense bool) string {
-	if validLicense {
-		return "app-enterprise"
-	}
-
-	return "app-grafana"
 }
