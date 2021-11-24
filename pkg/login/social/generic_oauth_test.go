@@ -650,7 +650,7 @@ func TestUserInfoSearchesForGroup(t *testing.T) {
 	t.Run("Given a generic OAuth provider", func(t *testing.T) {
 		provider := SocialGenericOAuth{
 			SocialBase: &SocialBase{
-				log: newLogger("generic_oauth_test", log15.LvlDebug),
+				log: newLogger("generic_oauth_test", "debug"),
 			},
 		}
 

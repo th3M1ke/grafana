@@ -37,10 +37,10 @@ func logSentryEventScenario(t *testing.T, desc string, event frontendlogging.Fro
 			logs = keyvals
 			return nil
 		}))
+		origHandler := frontendLogger.GetLogger()
 		frontendLogger.AddLogger(newfrontendLogger, "info", map[string]level.Option{})
 		sourceMapReads := []SourceMapReadRecord{}
 
-		origHandler := frontendLogger.GetLogger()
 		t.Cleanup(func() {
 			frontendLogger.SetLogger(origHandler)
 		})
@@ -152,7 +152,6 @@ func TestFrontendLoggingEndpoint(t *testing.T) {
 		logSentryEventScenario(t, "Should log received error event", errorEvent,
 			func(sc *scenarioContext, logs []interface{}, sourceMapReads []SourceMapReadRecord) {
 				assert.Equal(t, 200, sc.resp.Code)
-				assertContextContains(t, logs, "logger", "frontend")
 				assertContextContains(t, logs, "url", errorEvent.Request.URL)
 				assertContextContains(t, logs, "user_agent", errorEvent.Request.Headers["User-Agent"])
 				assertContextContains(t, logs, "event_id", errorEvent.EventID)
