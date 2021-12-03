@@ -128,6 +128,7 @@ const NativeSearch = ({ datasource, query, onChange, onBlur, onRunQuery }: Props
         <InlineFieldRow>
           <InlineField label="Service Name" labelWidth={14} grow>
             <Select
+              aria-label="Service Name"
               menuShouldPortal
               options={autocomplete.serviceNameOptions}
               value={query.serviceName || ''}
@@ -147,6 +148,7 @@ const NativeSearch = ({ datasource, query, onChange, onBlur, onRunQuery }: Props
         <InlineFieldRow>
           <InlineField label="Span Name" labelWidth={14} grow>
             <Select
+              aria-label="Span Name"
               menuShouldPortal
               options={autocomplete.spanNameOptions}
               value={query.spanName || ''}
@@ -237,6 +239,7 @@ const NativeSearch = ({ datasource, query, onChange, onBlur, onRunQuery }: Props
             tooltip="Maximum numbers of returned results"
           >
             <Input
+              aria-label="Limit"
               value={query.limit || ''}
               type="number"
               onChange={(v) => {

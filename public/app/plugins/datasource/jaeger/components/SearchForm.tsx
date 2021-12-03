@@ -54,6 +54,7 @@ export function SearchForm({ datasource, query, onChange }: Props) {
       <InlineFieldRow>
         <InlineField label="Service" labelWidth={14} grow>
           <Select
+            aria-label="Service"
             menuShouldPortal
             options={serviceOptions}
             value={serviceOptions?.find((v) => v.value === query.service) || null}
@@ -72,6 +73,7 @@ export function SearchForm({ datasource, query, onChange }: Props) {
       <InlineFieldRow>
         <InlineField label="Operation" labelWidth={14} grow disabled={!query.service}>
           <Select
+            aria-label="Operation"
             menuShouldPortal
             options={operationOptions}
             value={operationOptions?.find((v) => v.value === query.operation) || null}
@@ -87,8 +89,10 @@ export function SearchForm({ datasource, query, onChange }: Props) {
         </InlineField>
       </InlineFieldRow>
       <InlineFieldRow>
-        <InlineField label="Tags" labelWidth={14} grow>
+        <InlineField htmlFor="tags" label="Tags" labelWidth={14} grow>
           <Input
+            id="tags"
+            name="tags"
             value={transformToLogfmt(query.tags)}
             placeholder="http.status_code=200 error=true"
             onChange={(v) =>
