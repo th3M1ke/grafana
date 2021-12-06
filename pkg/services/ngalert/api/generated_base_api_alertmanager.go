@@ -148,5 +148,15 @@ func (api *API) RegisterAlertmanagerApiEndpoints(srv AlertmanagerApiService, m *
 				m,
 			),
 		)
+		group.Post(
+			toMacaronPath("/api/ngalert/templates"),
+			binding.Bind(apimodels.PostableTemplate{}),
+			metrics.Instrument(
+				http.MethodPost,
+				"/api/ngalert/templates",
+				srv.RoutePostTestReceivers,
+				m,
+			),
+		)
 	}, middleware.ReqSignedIn)
 }
