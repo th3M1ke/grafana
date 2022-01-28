@@ -4,8 +4,9 @@
   "id": "news",
 
   "skipDataQuery": true,
+  "hideFromList": true,
 
-  "state": "beta",
+  "state": "deprecated",
 
   "info": {
     "description": "RSS feed reader",

@@ -5,7 +5,7 @@ import { css, cx } from '@emotion/css';
 // Types
 import { InlineFormLabel, RadioButtonGroup } from '@grafana/ui';
 import { PromQuery } from '../types';
-import { PromExemplarField } from './PromExemplarField';
+// import { PromExemplarField } from './PromExemplarField'; // LOGZ.IO GRAFANA CHANGE :: Disable exemplars
 import { PrometheusDatasource } from '../datasource';
 
 export interface PromExploreExtraFieldProps {
@@ -77,11 +77,12 @@ export const PromExploreExtraField: React.FC<PromExploreExtraFieldProps> = memo(
           />
         </div>
 
-        <PromExemplarField
-          isEnabled={Boolean(query.exemplar)}
-          onChange={(isEnabled) => onChange({ ...query, exemplar: isEnabled })}
-          datasource={datasource}
-        />
+        {/*LOGZ.IO GRAFANA CHANGE :: Disable exemplars*/}
+        {/*<PromExemplarField*/}
+        {/*  isEnabled={Boolean(query.exemplar)}*/}
+        {/*  onChange={(isEnabled) => onChange({ ...query, exemplar: isEnabled })}*/}
+        {/*  datasource={datasource}*/}
+        {/*/>*/}
       </div>
     );
   }

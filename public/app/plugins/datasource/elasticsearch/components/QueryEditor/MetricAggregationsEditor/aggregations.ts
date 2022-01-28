@@ -20,6 +20,7 @@ export type MetricAggregationType =
   | 'raw_document'
   | 'raw_data'
   | 'logs'
+  | 'rate' // LOGZ.IO GRAFANA CHANGE :: DEV-25184 add rate function to metric aggregation types
   | PipelineMetricAggregationType;
 
 interface BaseMetricAggregation {
@@ -75,6 +76,15 @@ export interface Sum extends MetricAggregationWithField, MetricAggregationWithIn
 
 export interface Max extends MetricAggregationWithField, MetricAggregationWithInlineScript {
   type: 'max';
+  settings?: {
+    script?: InlineScript;
+    missing?: string;
+  };
+}
+
+// LOGZ.IO CHANGE
+export interface Rate extends MetricAggregationWithField, MetricAggregationWithInlineScript {
+  type: 'rate';
   settings?: {
     script?: InlineScript;
     missing?: string;
@@ -300,7 +310,9 @@ export type MetricAggregationWithSettings =
   | Average
   | MovingAverage
   | MovingFunction
-  | Logs;
+  | Logs
+  // LOGZ.IO CHANGE
+  | Rate;
 
 export type MetricAggregationWithMeta = ExtendedStats;
 
