@@ -61,6 +61,25 @@ func (m *migration) getOrCreateGeneralFolder(orgID int64) (*dashboard, error) {
 	return &dashboard, nil
 }
 
+// returns the folder of the given dashboard (if exists)
+func (m *migration) getFolder(dash dashboard, da dashAlert) (dashboard, error) {
+	// get folder if exists
+	folder := dashboard{}
+	if dash.FolderId > 0 {
+		exists, err := m.sess.Where("id=?", dash.FolderId).Get(&folder)
+		if err != nil {
+			return folder, fmt.Errorf("failed to get folder %d: %w", dash.FolderId, err)
+		}
+		if !exists {
+			return folder, fmt.Errorf("folder with id %v not found", dash.FolderId)
+		}
+		if !folder.IsFolder {
+			return folder, fmt.Errorf("id %v is a dashboard not a folder", dash.FolderId)
+		}
+	}
+	return folder, nil
+}
+
 // based on sqlstore.saveDashboard()
 // it should be called from inside a transaction
 func (m *migration) createFolder(orgID int64, title string) (*dashboard, error) {
@@ -133,9 +152,78 @@ func (m *migration) setACL(orgID int64, dashboardID int64, items []*dashboardAcl
 	if dashboardID <= 0 {
 		return fmt.Errorf("folder id must be greater than zero for a folder permission")
 	}
+
+	// userPermissionsMap is a map keeping the highest permission per user
+	// for handling conficting inherited (folder) and non-inherited (dashboard) user permissions
+	userPermissionsMap := make(map[int64]*dashboardAcl, len(items))
+	// teamPermissionsMap is a map keeping the highest permission per team
+	// for handling conficting inherited (folder) and non-inherited (dashboard) team permissions
+	teamPermissionsMap := make(map[int64]*dashboardAcl, len(items))
+	for _, item := range items {
+		if item.UserID != 0 {
+			acl, ok := userPermissionsMap[item.UserID]
+			if !ok {
+				userPermissionsMap[item.UserID] = item
+			} else {
+				if item.Permission > acl.Permission {
+					// the higher permission wins
+					userPermissionsMap[item.UserID] = item
+				}
+			}
+		}
+
+		if item.TeamID != 0 {
+			acl, ok := teamPermissionsMap[item.TeamID]
+			if !ok {
+				teamPermissionsMap[item.TeamID] = item
+			} else {
+				if item.Permission > acl.Permission {
+					// the higher permission wins
+					teamPermissionsMap[item.TeamID] = item
+				}
+			}
+		}
+	}
+
+	type keyType struct {
+		UserID     int64 `xorm:"user_id"`
+		TeamID     int64 `xorm:"team_id"`
+		Role       roleType
+		Permission permissionType
+	}
+	// seen keeps track of inserted perrmissions to avoid duplicates (due to inheritance)
+	seen := make(map[keyType]struct{}, len(items))
 	for _, item := range items {
 		if item.UserID == 0 && item.TeamID == 0 && (item.Role == nil || !item.Role.IsValid()) {
 			return models.ErrDashboardAclInfoMissing
+		}
+
+		// ignore duplicate user permissions
+		if item.UserID != 0 {
+			acl, ok := userPermissionsMap[item.UserID]
+			if ok {
+				if acl.Id != item.Id {
+					continue
+				}
+			}
+		}
+
+		// ignore duplicate team permissions
+		if item.TeamID != 0 {
+			acl, ok := teamPermissionsMap[item.TeamID]
+			if ok {
+				if acl.Id != item.Id {
+					continue
+				}
+			}
+		}
+
+		key := keyType{UserID: item.UserID, TeamID: item.TeamID, Role: "", Permission: item.Permission}
+		if item.Role != nil {
+			key.Role = *item.Role
+		}
+		if _, ok := seen[key]; ok {
+			continue
 		}
 
 		// unset Id so that the new record will get a different one
@@ -149,6 +237,7 @@ func (m *migration) setACL(orgID int64, dashboardID int64, items []*dashboardAcl
 		if _, err := m.sess.Insert(item); err != nil {
 			return err
 		}
+		seen[key] = struct{}{}
 	}
 
 	// Update dashboard HasAcl flag

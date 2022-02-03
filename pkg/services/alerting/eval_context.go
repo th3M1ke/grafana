@@ -24,7 +24,7 @@ type EvalContext struct {
 	StartTime      time.Time
 	EndTime        time.Time
 	Rule           *Rule
-	log            log.Logger
+	Log            log.Logger
 
 	dashboardRef *models.DashboardRef
 
@@ -47,7 +47,7 @@ func NewEvalContext(alertCtx context.Context, rule *Rule, evalTime time.Time, re
 		Rule:             rule,
 		Logs:             make([]*ResultLogEntry, 0),
 		EvalMatches:      make([]*EvalMatch, 0),
-		log:              log.New("alerting.evalContext"),
+		Log:              log.New("alerting.evalContext"),
 		PrevAlertState:   rule.State,
 		RequestValidator: requestValidator,
 	}
@@ -109,7 +109,7 @@ func (c *EvalContext) GetDashboardUID() (*models.DashboardRef, error) {
 	}
 
 	uidQuery := &models.GetDashboardRefByIdQuery{Id: c.Rule.DashboardID}
-	if err := bus.Dispatch(uidQuery); err != nil {
+	if err := bus.Dispatch(c.Ctx, uidQuery); err != nil {
 		return nil, err
 	}
 
@@ -153,7 +153,7 @@ func (c *EvalContext) GetNewState() models.AlertStateType {
 
 func getNewStateInternal(c *EvalContext) models.AlertStateType {
 	if c.Error != nil {
-		c.log.Error("Alert Rule Result Error",
+		c.Log.Error("Alert Rule Result Error",
 			"ruleId", c.Rule.ID,
 			"name", c.Rule.Name,
 			"error", c.Error,
@@ -170,7 +170,7 @@ func getNewStateInternal(c *EvalContext) models.AlertStateType {
 	}
 
 	if c.NoDataFound {
-		c.log.Info("Alert Rule returned no data",
+		c.Log.Info("Alert Rule returned no data",
 			"ruleId", c.Rule.ID,
 			"name", c.Rule.Name,
 			"changing state to", c.Rule.NoDataState.ToAlertState())

@@ -3,12 +3,16 @@ import LdapPage from 'app/features/admin/ldap/LdapPage';
 import UserAdminPage from 'app/features/admin/UserAdminPage';
 import { LoginPage } from 'app/core/components/Login/LoginPage';
 import config from 'app/core/config';
-import { DashboardRoutes } from 'app/types';
+import { AccessControlAction, DashboardRoutes } from 'app/types';
 import { SafeDynamicImport } from '../core/components/DynamicImports/SafeDynamicImport';
 import { RouteDescriptor } from '../core/navigation/types';
-import { SignupPage } from 'app/core/components/Signup/SignupPage';
 import { Redirect } from 'react-router-dom';
 import ErrorPage from 'app/core/components/ErrorPage/ErrorPage';
+import { getRoutes as getPluginCatalogRoutes } from 'app/features/plugins/admin/routes';
+import { contextSrv } from 'app/core/services/context_srv';
+import { getLiveRoutes } from 'app/features/live/pages/routes';
+import { getAlertingRoutes } from 'app/features/alerting/routes';
+import ServiceAccountPage from 'app/features/serviceaccounts/ServiceAccountPage';
 
 export const extraRoutes: RouteDescriptor[] = [];
 
@@ -136,7 +140,10 @@ export function getAppRoutes(): RouteDescriptor[] {
     {
       path: '/explore',
       pageClass: 'page-explore',
-      roles: () => (config.viewersCanEdit ? [] : ['Editor', 'Admin']),
+      roles: () =>
+        contextSrv.evaluatePermission(() => (config.viewersCanEdit ? [] : ['Editor', 'Admin']), [
+          AccessControlAction.DataSourcesExplore,
+        ]),
       component: SafeDynamicImport(() => import(/* webpackChunkName: "explore" */ 'app/features/explore/Wrapper')),
     },
     {
@@ -144,7 +151,7 @@ export function getAppRoutes(): RouteDescriptor[] {
       exact: false,
       // Someday * and will get a ReactRouter under that path!
       component: SafeDynamicImport(
-        () => import(/* webpackChunkName: "AppRootPage" */ 'app/features/plugins/AppRootPage')
+        () => import(/* webpackChunkName: "AppRootPage" */ 'app/features/plugins/components/AppRootPage')
       ),
     },
     {
@@ -175,6 +182,18 @@ export function getAppRoutes(): RouteDescriptor[] {
       component: SafeDynamicImport(
         () => import(/* webpackChunkName: "ApiKeysPage" */ 'app/features/api-keys/ApiKeysPage')
       ),
+    },
+    {
+      path: '/org/serviceaccounts',
+      roles: () => ['Editor', 'Admin'],
+      component: SafeDynamicImport(
+        () =>
+          import(/* webpackChunkName: "ServiceAccountsPage" */ 'app/features/serviceaccounts/ServiceAccountsListPage')
+      ),
+    },
+    {
+      path: '/org/serviceaccounts/:id',
+      component: ServiceAccountPage,
     },
     {
       path: '/org/teams',
@@ -279,8 +298,19 @@ export function getAppRoutes(): RouteDescriptor[] {
       pageClass: 'sidemenu-hidden',
     },
     {
+      path: '/verify',
+      component: !config.verifyEmailEnabled
+        ? () => <Redirect to="/signup" />
+        : SafeDynamicImport(
+            () => import(/* webpackChunkName "VerifyEmailPage"*/ 'app/core/components/Signup/VerifyEmailPage')
+          ),
+      pageClass: 'login-page sidemenu-hidden',
+    },
+    {
       path: '/signup',
-      component: SignupPage,
+      component: config.disableUserSignUp
+        ? () => <Redirect to="/login" />
+        : SafeDynamicImport(() => import(/* webpackChunkName "SignupPage"*/ 'app/core/components/Signup/SignupPage')),
       pageClass: 'sidemenu-hidden login-page',
     },
     {
@@ -305,137 +335,6 @@ export function getAppRoutes(): RouteDescriptor[] {
       path: '/dashboard/snapshots',
       component: SafeDynamicImport(
         () => import(/* webpackChunkName: "SnapshotListPage" */ 'app/features/manage-dashboards/SnapshotListPage')
-      ),
-    },
-    {
-      path: '/plugins',
-      component: SafeDynamicImport(
-        () => import(/* webpackChunkName: "PluginListPage" */ 'app/features/plugins/PluginListPage')
-      ),
-    },
-    {
-      path: '/plugins/:pluginId/',
-      component: SafeDynamicImport(() => import(/* webpackChunkName: "PluginPage" */ '../features/plugins/PluginPage')),
-    },
-    // TODO[Router]
-    // {
-    //   path: '/plugins/:pluginId/page/:slug',
-    //   templateUrl: 'public/app/features/plugins/partials/plugin_page.html',
-    //   controller: 'AppPageCtrl',
-    //   controllerAs: 'ctrl',
-    // },
-    {
-      path: '/alerting',
-      // eslint-disable-next-line react/display-name
-      component: () => <Redirect to="/alerting/list" />,
-    },
-    {
-      path: '/alerting/list',
-      component: SafeDynamicImport(
-        () => import(/* webpackChunkName: "AlertRuleListIndex" */ 'app/features/alerting/AlertRuleListIndex')
-      ),
-    },
-    {
-      path: '/alerting/ng/list',
-      component: SafeDynamicImport(
-        () => import(/* webpackChunkName: "AlertRuleList" */ 'app/features/alerting/AlertRuleList')
-      ),
-    },
-    {
-      path: '/alerting/routes',
-      roles: () => ['Admin', 'Editor'],
-      component: SafeDynamicImport(
-        () => import(/* webpackChunkName: "AlertAmRoutes" */ 'app/features/alerting/unified/AmRoutes')
-      ),
-    },
-    {
-      path: '/alerting/silences',
-      component: SafeDynamicImport(
-        () => import(/* webpackChunkName: "AlertSilences" */ 'app/features/alerting/unified/Silences')
-      ),
-    },
-    {
-      path: '/alerting/silence/new',
-      roles: () => ['Editor', 'Admin'],
-      component: SafeDynamicImport(
-        () => import(/* webpackChunkName: "AlertSilences" */ 'app/features/alerting/unified/Silences')
-      ),
-    },
-    {
-      path: '/alerting/silence/:id/edit',
-      roles: () => ['Editor', 'Admin'],
-      component: SafeDynamicImport(
-        () => import(/* webpackChunkName: "AlertSilences" */ 'app/features/alerting/unified/Silences')
-      ),
-    },
-    {
-      path: '/alerting/notifications',
-      roles: config.featureToggles.ngalert ? () => ['Editor', 'Admin'] : undefined,
-      component: SafeDynamicImport(
-        () => import(/* webpackChunkName: "NotificationsListPage" */ 'app/features/alerting/NotificationsIndex')
-      ),
-    },
-    {
-      path: '/alerting/notifications/templates/new',
-      roles: () => ['Editor', 'Admin'],
-      component: SafeDynamicImport(
-        () => import(/* webpackChunkName: "NotificationsListPage" */ 'app/features/alerting/NotificationsIndex')
-      ),
-    },
-    {
-      path: '/alerting/notifications/templates/:id/edit',
-      roles: () => ['Editor', 'Admin'],
-      component: SafeDynamicImport(
-        () => import(/* webpackChunkName: "NotificationsListPage" */ 'app/features/alerting/NotificationsIndex')
-      ),
-    },
-    {
-      path: '/alerting/notifications/receivers/new',
-      roles: () => ['Editor', 'Admin'],
-      component: SafeDynamicImport(
-        () => import(/* webpackChunkName: "NotificationsListPage" */ 'app/features/alerting/NotificationsIndex')
-      ),
-    },
-    {
-      path: '/alerting/notifications/receivers/:id/edit',
-      roles: () => ['Editor', 'Admin'],
-      component: SafeDynamicImport(
-        () => import(/* webpackChunkName: "NotificationsListPage" */ 'app/features/alerting/NotificationsIndex')
-      ),
-    },
-    {
-      path: '/alerting/notifications/global-config',
-      roles: () => ['Admin', 'Editor'],
-      component: SafeDynamicImport(
-        () => import(/* webpackChunkName: "NotificationsListPage" */ 'app/features/alerting/NotificationsIndex')
-      ),
-    },
-    {
-      path: '/alerting/notification/new',
-      component: SafeDynamicImport(
-        () =>
-          import(/* webpackChunkName: "NewNotificationChannel" */ 'app/features/alerting/NewNotificationChannelPage')
-      ),
-    },
-    {
-      path: '/alerting/notification/:id/edit',
-      component: SafeDynamicImport(
-        () =>
-          import(/* webpackChunkName: "EditNotificationChannel"*/ 'app/features/alerting/EditNotificationChannelPage')
-      ),
-    },
-    {
-      path: '/alerting/new',
-      pageClass: 'page-alerting',
-      component: SafeDynamicImport(
-        () => import(/* webpackChunkName: "AlertingRuleForm"*/ 'app/features/alerting/unified/RuleEditor')
-      ),
-    },
-    {
-      path: '/alerting/:id/edit',
-      pageClass: 'page-alerting',
-      component: SafeDynamicImport(
-        () => import(/* webpackChunkName: "AlertingRuleForm"*/ 'app/features/alerting/unified/RuleEditor')
       ),
     },
     {
@@ -469,6 +368,12 @@ export function getAppRoutes(): RouteDescriptor[] {
       ),
     },
     {
+      path: '/sandbox/test',
+      component: SafeDynamicImport(
+        () => import(/* webpackChunkName: "TestStuffPage"*/ 'app/features/sandbox/TestStuffPage')
+      ),
+    },
+    {
       path: '/dashboards/f/:uid/:slug/library-panels',
       component: SafeDynamicImport(
         () => import(/* webpackChunkName: "FolderLibraryPanelsPage"*/ 'app/features/folders/FolderLibraryPanelsPage')
@@ -480,12 +385,14 @@ export function getAppRoutes(): RouteDescriptor[] {
         () => import(/* webpackChunkName: "LibraryPanelsPage"*/ 'app/features/library-panels/LibraryPanelsPage')
       ),
     },
+    ...getPluginCatalogRoutes(),
+    ...getLiveRoutes(),
+    ...getAlertingRoutes(),
     ...extraRoutes,
     {
       path: '/*',
       component: ErrorPage,
     },
-
     // TODO[Router]
     // ...playlistRoutes,
   ];

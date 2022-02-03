@@ -9,14 +9,40 @@ import {
   makeClassES5Compatible,
   DataFrame,
   parseLiveChannelAddress,
-  StreamingFrameOptions,
+  getDataSourceRef,
+  DataSourceRef,
+  dataFrameToJSON,
 } from '@grafana/data';
 import { merge, Observable, of } from 'rxjs';
 import { catchError, switchMap } from 'rxjs/operators';
-import { getBackendSrv, getDataSourceSrv, getGrafanaLiveSrv } from '../services';
+import {
+  getBackendSrv,
+  getDataSourceSrv,
+  getGrafanaLiveSrv,
+  StreamingFrameOptions,
+  StreamingFrameAction,
+} from '../services';
+import { config } from '../config';
 import { BackendDataSourceResponse, toDataQueryResponse } from './queryResponse';
 
-const ExpressionDatasourceID = '__expr__';
+/**
+ * @internal
+ */
+export const ExpressionDatasourceRef = Object.freeze({
+  type: '__expr__',
+  uid: '__expr__',
+});
+
+/**
+ * @internal
+ */
+export function isExpressionReference(ref?: DataSourceRef | string | null): boolean {
+  if (!ref) {
+    return false;
+  }
+  const v = (ref as any).type ?? ref;
+  return v === ExpressionDatasourceRef.type || v === '-100'; // -100 was a legacy accident that should be removed
+}
 
 class HealthCheckError extends Error {
   details: HealthCheckResultDetails;
@@ -88,28 +114,31 @@ class DataSourceWithBackend<
     }
 
     const queries = targets.map((q) => {
+      let datasource = this.getRef();
       let datasourceId = this.id;
 
-      if (q.datasource === ExpressionDatasourceID) {
+      if (isExpressionReference(q.datasource)) {
         return {
           ...q,
-          datasourceId,
+          datasource: ExpressionDatasourceRef,
         };
       }
 
       if (q.datasource) {
-        const ds = getDataSourceSrv().getInstanceSettings(q.datasource);
+        const ds = getDataSourceSrv().getInstanceSettings(q.datasource, request.scopedVars);
 
         if (!ds) {
-          throw new Error('Unknown Datasource: ' + q.datasource);
+          throw new Error(`Unknown Datasource: ${JSON.stringify(q.datasource)}`);
         }
 
+        datasource = ds.rawRef ?? getDataSourceRef(ds);
         datasourceId = ds.id;
       }
 
       return {
         ...this.applyTemplateVariables(q, request.scopedVars),
-        datasourceId,
+        datasource,
+        datasourceId, // deprecated!
         intervalMs,
         maxDataPoints,
       };
@@ -128,6 +157,13 @@ class DataSourceWithBackend<
       body.to = range.to.valueOf().toString();
     }
 
+    if (config.featureToggles.queryOverLive) {
+      return getGrafanaLiveSrv().getQueryData({
+        request,
+        body,
+      });
+    }
+
     return getBackendSrv()
       .fetch<BackendDataSourceResponse>({
         url: '/api/ds/query',
@@ -140,7 +176,7 @@ class DataSourceWithBackend<
           const rsp = toDataQueryResponse(raw, queries as DataQuery[]);
           // Check if any response should subscribe to a live stream
           if (rsp.data?.length && rsp.data.find((f: DataFrame) => f.meta?.channel)) {
-            return toStreamingDataResponse(request, rsp);
+            return toStreamingDataResponse(rsp, request, this.streamOptionsProvider);
           }
           return of(rsp);
         }),
@@ -151,13 +187,11 @@ class DataSourceWithBackend<
   }
 
   /**
-   * Override to skip executing a query
-   *
-   * @returns false if the query should be skipped
-   *
-   * @virtual
+   * Apply template variables for explore
    */
-  filterQuery?(query: TQuery): boolean;
+  interpolateVariablesInQueries(queries: TQuery[], scopedVars: ScopedVars | {}): TQuery[] {
+    return queries.map((q) => this.applyTemplateVariables(q, scopedVars) as TQuery);
+  }
 
   /**
    * Override to apply template variables.  The result is usually also `TQuery`, but sometimes this can
@@ -171,6 +205,11 @@ class DataSourceWithBackend<
   applyTemplateVariables(query: TQuery, scopedVars: ScopedVars): Record<string, any> {
     return query;
   }
+
+  /**
+   * Optionally override the streaming behavior
+   */
+  streamOptionsProvider: StreamOptionsProvider<TQuery> = standardStreamOptionsProvider;
 
   /**
    * Make a GET request to the datasource resource path
@@ -218,38 +257,34 @@ class DataSourceWithBackend<
   }
 }
 
-export function toStreamingDataResponse(
-  request: DataQueryRequest,
-  rsp: DataQueryResponse
+/**
+ * @internal exported for tests
+ */
+export function toStreamingDataResponse<TQuery extends DataQuery = DataQuery>(
+  rsp: DataQueryResponse,
+  req: DataQueryRequest<TQuery>,
+  getter: (req: DataQueryRequest<TQuery>, frame: DataFrame) => Partial<StreamingFrameOptions>
 ): Observable<DataQueryResponse> {
   const live = getGrafanaLiveSrv();
   if (!live) {
     return of(rsp); // add warning?
   }
 
-  const buffer: StreamingFrameOptions = {
-    maxLength: request.maxDataPoints ?? 500,
-  };
-
-  // For recent queries, clamp to the current time range
-  if (request.rangeRaw?.to === 'now') {
-    buffer.maxDelta = request.range.to.valueOf() - request.range.from.valueOf();
-  }
-
   const staticdata: DataFrame[] = [];
   const streams: Array<Observable<DataQueryResponse>> = [];
-  for (const frame of rsp.data) {
-    const addr = parseLiveChannelAddress(frame.meta?.channel);
+  for (const f of rsp.data) {
+    const addr = parseLiveChannelAddress(f.meta?.channel);
     if (addr) {
+      const frame = f as DataFrame;
       streams.push(
         live.getDataStream({
           addr,
-          buffer,
-          frame: frame as DataFrame,
+          buffer: getter(req, frame),
+          frame: dataFrameToJSON(f),
         })
       );
     } else {
-      staticdata.push(frame);
+      staticdata.push(f);
     }
   }
   if (staticdata.length) {
@@ -260,6 +295,32 @@ export function toStreamingDataResponse(
   }
   return merge(...streams);
 }
+
+/**
+ * This allows data sources to customize the streaming connection query
+ *
+ * @public
+ */
+export type StreamOptionsProvider<TQuery extends DataQuery = DataQuery> = (
+  request: DataQueryRequest<TQuery>,
+  frame: DataFrame
+) => Partial<StreamingFrameOptions>;
+
+/**
+ * @public
+ */
+export const standardStreamOptionsProvider: StreamOptionsProvider = (request: DataQueryRequest, frame: DataFrame) => {
+  const opts: Partial<StreamingFrameOptions> = {
+    maxLength: request.maxDataPoints ?? 500,
+    action: StreamingFrameAction.Append,
+  };
+
+  // For recent queries, clamp to the current time range
+  if (request.rangeRaw?.to === 'now') {
+    opts.maxDelta = request.range.to.valueOf() - request.range.from.valueOf();
+  }
+  return opts;
+};
 
 //@ts-ignore
 DataSourceWithBackend = makeClassES5Compatible(DataSourceWithBackend);

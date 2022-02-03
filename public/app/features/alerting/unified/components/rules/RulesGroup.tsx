@@ -1,6 +1,6 @@
 import { CombinedRuleGroup, CombinedRuleNamespace } from 'app/types/unified-alerting';
-import React, { FC, useState } from 'react';
-import { Icon, Tooltip, useStyles2 } from '@grafana/ui';
+import React, { FC, useState, useEffect } from 'react';
+import { HorizontalGroup, Icon, Spinner, Tooltip, useStyles2 } from '@grafana/ui';
 import { GrafanaTheme2 } from '@grafana/data';
 import { css } from '@emotion/css';
 import { isGrafanaRulerRule } from '../../utils/rules';
@@ -12,37 +12,62 @@ import { useHasRuler } from '../../hooks/useHasRuler';
 import kbn from 'app/core/utils/kbn';
 import { useFolder } from '../../hooks/useFolder';
 import { RuleStats } from './RuleStats';
+import { EditCloudGroupModal } from './EditCloudGroupModal';
 
 interface Props {
   namespace: CombinedRuleNamespace;
   group: CombinedRuleGroup;
+  expandAll: boolean;
 }
 
-export const RulesGroup: FC<Props> = React.memo(({ group, namespace }) => {
+export const RulesGroup: FC<Props> = React.memo(({ group, namespace, expandAll }) => {
   const { rulesSource } = namespace;
   const styles = useStyles2(getStyles);
 
-  const [isCollapsed, setIsCollapsed] = useState(true);
+  const [isEditingGroup, setIsEditingGroup] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(!expandAll);
+
+  useEffect(() => {
+    setIsCollapsed(!expandAll);
+  }, [expandAll]);
 
   const hasRuler = useHasRuler();
   const rulerRule = group.rules[0]?.rulerRule;
   const folderUID = (rulerRule && isGrafanaRulerRule(rulerRule) && rulerRule.grafana_alert.namespace_uid) || undefined;
   const { folder } = useFolder(folderUID);
 
+  // group "is deleting" if rules source has ruler, but this group has no rules that are in ruler
+  const isDeleting = hasRuler(rulesSource) && !group.rules.find((rule) => !!rule.rulerRule);
+
   const actionIcons: React.ReactNode[] = [];
 
   // for grafana, link to folder views
-  if (rulesSource === GRAFANA_RULES_SOURCE_NAME) {
+  if (isDeleting) {
+    actionIcons.push(
+      <HorizontalGroup key="is-deleting">
+        <Spinner />
+        deleting
+      </HorizontalGroup>
+    );
+  } else if (rulesSource === GRAFANA_RULES_SOURCE_NAME) {
     if (folderUID) {
       const baseUrl = `/dashboards/f/${folderUID}/${kbn.slugifyForUrl(namespace.name)}`;
       if (folder?.canSave) {
         actionIcons.push(
-          <ActionIcon key="edit" icon="pen" tooltip="edit" to={baseUrl + '/settings'} target="__blank" />
+          <ActionIcon
+            aria-label="edit folder"
+            key="edit"
+            icon="pen"
+            tooltip="edit folder"
+            to={baseUrl + '/settings'}
+            target="__blank"
+          />
         );
       }
       if (folder?.canAdmin) {
         actionIcons.push(
           <ActionIcon
+            aria-label="manage permissions"
             key="manage-perms"
             icon="lock"
             tooltip="manage permissions"
@@ -51,9 +76,18 @@ export const RulesGroup: FC<Props> = React.memo(({ group, namespace }) => {
           />
         );
       }
-    } else if (hasRuler(rulesSource)) {
-      actionIcons.push(<ActionIcon key="edit" icon="pen" tooltip="edit" />); // @TODO
     }
+  } else if (hasRuler(rulesSource)) {
+    actionIcons.push(
+      <ActionIcon
+        aria-label="edit rule group"
+        data-testid="edit-group"
+        key="edit"
+        icon="pen"
+        tooltip="edit rule group"
+        onClick={() => setIsEditingGroup(true)}
+      />
+    );
   }
 
   const groupName = isCloudRulesSource(rulesSource) ? `${namespace.name} > ${group.name}` : namespace.name;
@@ -67,10 +101,14 @@ export const RulesGroup: FC<Props> = React.memo(({ group, namespace }) => {
           onToggle={setIsCollapsed}
           data-testid="group-collapse-toggle"
         />
-        <Icon name={isCollapsed ? 'folder-open' : 'folder'} />
+        <Icon name={isCollapsed ? 'folder' : 'folder-open'} />
         {isCloudRulesSource(rulesSource) && (
           <Tooltip content={rulesSource.name} placement="top">
-            <img className={styles.dataSourceIcon} src={rulesSource.meta.info.logos.small} />
+            <img
+              alt={rulesSource.meta.name}
+              className={styles.dataSourceIcon}
+              src={rulesSource.meta.info.logos.small}
+            />
           </Tooltip>
         )}
         <h6 className={styles.heading}>{groupName}</h6>
@@ -87,6 +125,9 @@ export const RulesGroup: FC<Props> = React.memo(({ group, namespace }) => {
       </div>
       {!isCollapsed && (
         <RulesTable showSummaryColumn={true} className={styles.rulesTable} showGuidelines={true} rules={group.rules} />
+      )}
+      {isEditingGroup && (
+        <EditCloudGroupModal group={group} namespace={namespace} onClose={() => setIsEditingGroup(false)} />
       )}
     </div>
   );
@@ -106,10 +147,17 @@ export const getStyles = (theme: GrafanaTheme2) => ({
     align-items: center;
     padding: ${theme.spacing(1)} ${theme.spacing(1)} ${theme.spacing(1)} 0;
     background-color: ${theme.colors.background.secondary};
+    flex-wrap: wrap;
   `,
   headerStats: css`
     span {
       vertical-align: middle;
+    }
+
+    ${theme.breakpoints.down('sm')} {
+      order: 2;
+      width: 100%;
+      padding-left: ${theme.spacing(1)};
     }
   `,
   heading: css`

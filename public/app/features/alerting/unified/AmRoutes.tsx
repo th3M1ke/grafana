@@ -16,13 +16,17 @@ import { fetchAlertManagerConfigAction, updateAlertManagerConfigAction } from '.
 import { AmRouteReceiver, FormAmRoute } from './types/amroutes';
 import { amRouteToFormAmRoute, formAmRouteToAmRoute, stringsToSelectableValues } from './utils/amroutes';
 import { initialAsyncRequestState } from './utils/redux';
+import { isVanillaPrometheusAlertManagerDataSource } from './utils/datasource';
+import { MuteTimingsTable } from './components/amroutes/MuteTimingsTable';
 
 const AmRoutes: FC = () => {
   const dispatch = useDispatch();
   const styles = useStyles2(getStyles);
   const [isRootRouteEditMode, setIsRootRouteEditMode] = useState(false);
-
   const [alertManagerSourceName, setAlertManagerSourceName] = useAlertManagerSourceName();
+
+  const readOnly = alertManagerSourceName ? isVanillaPrometheusAlertManagerDataSource(alertManagerSourceName) : true;
+
   const amConfigs = useUnifiedAlertingSelector((state) => state.amConfigs);
 
   const fetchConfig = useCallback(() => {
@@ -39,7 +43,7 @@ const AmRoutes: FC = () => {
     (alertManagerSourceName && amConfigs[alertManagerSourceName]) || initialAsyncRequestState;
 
   const config = result?.alertmanager_config;
-  const [routes, id2ExistingRoute] = useMemo(() => amRouteToFormAmRoute(config?.route), [config?.route]);
+  const [rootRoute, id2ExistingRoute] = useMemo(() => amRouteToFormAmRoute(config?.route), [config?.route]);
 
   const receivers = stringsToSelectableValues(
     (config?.receivers ?? []).map((receiver: Receiver) => receiver.name)
@@ -54,14 +58,15 @@ const AmRoutes: FC = () => {
   };
 
   useCleanup((state) => state.unifiedAlerting.saveAMConfig);
-  const { loading: saving, error: savingError, dispatched: savingDispatched } = useUnifiedAlertingSelector(
-    (state) => state.saveAMConfig
-  );
-
   const handleSave = (data: Partial<FormAmRoute>) => {
+    if (!result) {
+      return;
+    }
+
     const newData = formAmRouteToAmRoute(
+      alertManagerSourceName,
       {
-        ...routes,
+        ...rootRoute,
         ...data,
       },
       id2ExistingRoute
@@ -83,15 +88,10 @@ const AmRoutes: FC = () => {
         oldConfig: result,
         alertManagerSourceName: alertManagerSourceName!,
         successMessage: 'Saved',
+        refetch: true,
       })
     );
   };
-
-  useEffect(() => {
-    if (savingDispatched && !saving && !savingError) {
-      fetchConfig();
-    }
-  }, [fetchConfig, savingDispatched, saving, savingError]);
 
   if (!alertManagerSourceName) {
     return <Redirect to="/alerting/routes" />;
@@ -101,11 +101,11 @@ const AmRoutes: FC = () => {
     <AlertingPageWrapper pageId="am-routes">
       <AlertManagerPicker current={alertManagerSourceName} onChange={setAlertManagerSourceName} />
       {resultError && !resultLoading && (
-        <Alert severity="error" title="Error loading alert manager config">
+        <Alert severity="error" title="Error loading Alertmanager config">
           {resultError.message || 'Unknown error.'}
         </Alert>
       )}
-      {resultLoading && <LoadingPlaceholder text="Loading alert manager config..." />}
+      {resultLoading && <LoadingPlaceholder text="Loading Alertmanager config..." />}
       {result && !resultLoading && !resultError && (
         <>
           <AmRootRoute
@@ -115,15 +115,18 @@ const AmRoutes: FC = () => {
             onEnterEditMode={enterRootRouteEditMode}
             onExitEditMode={exitRootRouteEditMode}
             receivers={receivers}
-            routes={routes}
+            routes={rootRoute}
           />
           <div className={styles.break} />
           <AmSpecificRouting
             onChange={handleSave}
+            readOnly={readOnly}
             onRootRouteEdit={enterRootRouteEditMode}
             receivers={receivers}
-            routes={routes}
+            routes={rootRoute}
           />
+          <div className={styles.break} />
+          <MuteTimingsTable alertManagerSourceName={alertManagerSourceName} />
         </>
       )}
     </AlertingPageWrapper>
@@ -137,6 +140,5 @@ const getStyles = (theme: GrafanaTheme2) => ({
     width: 100%;
     height: 0;
     margin-bottom: ${theme.spacing(2)};
-    border-bottom: solid 1px ${theme.colors.border.medium};
   `,
 });

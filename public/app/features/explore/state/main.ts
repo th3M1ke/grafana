@@ -1,6 +1,6 @@
 import { AnyAction } from 'redux';
 import { DataSourceSrv, getDataSourceSrv, locationService } from '@grafana/runtime';
-import { DataQuery, ExploreUrlState, serializeStateToUrlParam, TimeRange, UrlQueryMap } from '@grafana/data';
+import { ExploreUrlState, serializeStateToUrlParam, SplitOpen, UrlQueryMap } from '@grafana/data';
 import { GetExploreUrlArguments, stopQueryState } from 'app/core/utils/explore';
 import { ExploreId, ExploreItemState, ExploreState } from 'app/types/explore';
 import { paneReducer } from './explorePane';
@@ -20,6 +20,8 @@ export interface SyncTimesPayload {
 export const syncTimesAction = createAction<SyncTimesPayload>('explore/syncTimes');
 
 export const richHistoryUpdatedAction = createAction<any>('explore/richHistoryUpdated');
+export const localStorageFullAction = createAction('explore/localStorageFullAction');
+export const richHistoryLimitExceededAction = createAction('explore/richHistoryLimitExceededAction');
 
 /**
  * Resets state for explore.
@@ -62,10 +64,10 @@ export const stateSave = (options?: { replace?: boolean }): ThunkResult<void> =>
     const orgId = getState().user.orgId.toString();
     const urlStates: { [index: string]: string | null } = { orgId };
 
-    urlStates.left = serializeStateToUrlParam(getUrlStateFromPaneState(left), true);
+    urlStates.left = serializeStateToUrlParam(getUrlStateFromPaneState(left));
 
     if (right) {
-      urlStates.right = serializeStateToUrlParam(getUrlStateFromPaneState(right), true);
+      urlStates.right = serializeStateToUrlParam(getUrlStateFromPaneState(right));
     } else {
       urlStates.right = null;
     }
@@ -85,12 +87,7 @@ export const lastSavedUrl: UrlQueryMap = {};
  * or uses values from options arg. This does only navigation each pane is then responsible for initialization from
  * the URL.
  */
-export function splitOpen<T extends DataQuery = any>(options?: {
-  datasourceUid: string;
-  query: T;
-  // Don't use right now. It's used for Traces to Logs interaction but is hacky in how the range is actually handled.
-  range?: TimeRange;
-}): ThunkResult<void> {
+export const splitOpen: SplitOpen = (options): ThunkResult<void> => {
   return async (dispatch, getState) => {
     const leftState: ExploreItemState = getState().explore[ExploreId.left];
     const leftUrlState = getUrlStateFromPaneState(leftState);
@@ -102,13 +99,14 @@ export function splitOpen<T extends DataQuery = any>(options?: {
         datasource: datasourceName,
         queries: [options.query],
         range: options.range || leftState.range,
+        panelsState: options.panelsState,
       };
     }
 
-    const urlState = serializeStateToUrlParam(rightUrlState, true);
+    const urlState = serializeStateToUrlParam(rightUrlState);
     locationService.partial({ right: urlState }, true);
   };
-}
+};
 
 /**
  * Close the split view and save URL state. We need to update the state here because when closing we cannot just
@@ -136,11 +134,8 @@ export const navigateToExplore = (
   return async (dispatch) => {
     const { getDataSourceSrv, getTimeSrv, getExploreUrl, openInNewWindow } = dependencies;
     const datasourceSrv = getDataSourceSrv();
-    const datasource = await datasourceSrv.get(panel.datasource);
     const path = await getExploreUrl({
       panel,
-      panelTargets: panel.targets,
-      panelDatasource: datasource,
       datasourceSrv,
       timeSrv: getTimeSrv(),
     });
@@ -163,6 +158,8 @@ export const initialExploreState: ExploreState = {
   left: initialExploreItemState,
   right: undefined,
   richHistory: [],
+  localStorageFull: false,
+  richHistoryLimitExceededWarningShown: false,
 };
 
 /**
@@ -214,6 +211,20 @@ export const exploreReducer = (state = initialExploreState, action: AnyAction): 
     return {
       ...state,
       richHistory: action.payload.richHistory,
+    };
+  }
+
+  if (localStorageFullAction.match(action)) {
+    return {
+      ...state,
+      localStorageFull: true,
+    };
+  }
+
+  if (richHistoryLimitExceededAction.match(action)) {
+    return {
+      ...state,
+      richHistoryLimitExceededWarningShown: true,
     };
   }
 

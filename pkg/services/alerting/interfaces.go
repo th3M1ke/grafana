@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/grafana/grafana/pkg/models"
-	"github.com/grafana/grafana/pkg/plugins"
+	"github.com/grafana/grafana/pkg/tsdb/legacydata"
 )
 
 type evalHandler interface {
@@ -59,7 +59,7 @@ type ConditionResult struct {
 }
 
 // Condition is responsible for evaluating an alert condition.
- // LOGZ.IO GRAFANA CHANGE :: DEV-17927 - Add time param.
+// LOGZ.IO GRAFANA CHANGE :: DEV-17927 - Add time param.
 type Condition interface {
-	Eval(result *EvalContext, time time.Time, requestHandler plugins.DataRequestHandler) (*ConditionResult, error)
+	Eval(result *EvalContext, time time.Time, requestHandler legacydata.RequestHandler) (*ConditionResult, error)
 }

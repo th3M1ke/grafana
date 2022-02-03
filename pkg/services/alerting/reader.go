@@ -1,6 +1,7 @@
 package alerting
 
 import (
+	"context"
 	"sync"
 
 	"github.com/grafana/grafana/pkg/bus"
@@ -10,7 +11,7 @@ import (
 )
 
 type ruleReader interface {
-	fetch() []*Rule
+	fetch(context.Context) []*Rule
 	fetchOne(cmd *models.GetAlertByIdQuery) *Rule // LOGZ.IO GRAFANA CHANGE :: DEV-17927 fetch single alert by id
 }
 
@@ -27,17 +28,17 @@ func newRuleReader() *defaultRuleReader {
 	return ruleReader
 }
 
-func (arr *defaultRuleReader) fetch() []*Rule {
+func (arr *defaultRuleReader) fetch(ctx context.Context) []*Rule {
 	cmd := &models.GetAllAlertsQuery{}
 
-	if err := bus.Dispatch(cmd); err != nil {
+	if err := bus.Dispatch(ctx, cmd); err != nil {
 		arr.log.Error("Could not load alerts", "error", err)
 		return []*Rule{}
 	}
 
 	res := make([]*Rule, 0)
 	for _, ruleDef := range cmd.Result {
-		if model, err := NewRuleFromDBAlert(ruleDef, false); err != nil {
+		if model, err := NewRuleFromDBAlert(ctx, ruleDef, false); err != nil {
 			arr.log.Error("Could not build alert model for rule", "ruleId", ruleDef.Id, "error", err)
 		} else {
 			res = append(res, model)
@@ -63,4 +64,5 @@ func (arr *defaultRuleReader) fetchOne(cmd *models.GetAlertByIdQuery) *Rule {
 		return model
 	}
 }
+
 // LOGZ.IO GRAFANA CHANGE :: end

@@ -8,44 +8,43 @@ import (
 	"github.com/prometheus/alertmanager/template"
 	"github.com/prometheus/alertmanager/types"
 
-	"github.com/grafana/grafana/pkg/bus"
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/models"
-	"github.com/grafana/grafana/pkg/services/alerting"
-	old_notifiers "github.com/grafana/grafana/pkg/services/alerting/notifiers"
+	"github.com/grafana/grafana/pkg/services/notifications"
 	"github.com/grafana/grafana/pkg/util"
 )
 
 // EmailNotifier is responsible for sending
 // alert notifications over email.
 type EmailNotifier struct {
-	old_notifiers.NotifierBase
+	*Base
 	Addresses   []string
 	SingleEmail bool
 	Message     string
 	log         log.Logger
+	ns          notifications.EmailSender
 	tmpl        *template.Template
 }
 
 // NewEmailNotifier is the constructor function
 // for the EmailNotifier.
-func NewEmailNotifier(model *NotificationChannelConfig, t *template.Template) (*EmailNotifier, error) {
+func NewEmailNotifier(model *NotificationChannelConfig, ns notifications.EmailSender, t *template.Template) (*EmailNotifier, error) {
 	if model.Settings == nil {
-		return nil, alerting.ValidationError{Reason: "No Settings Supplied"}
+		return nil, receiverInitError{Cfg: *model, Reason: "no settings supplied"}
 	}
 
 	addressesString := model.Settings.Get("addresses").MustString()
 	singleEmail := model.Settings.Get("singleEmail").MustBool(false)
 
 	if addressesString == "" {
-		return nil, alerting.ValidationError{Reason: "Could not find addresses in settings"}
+		return nil, receiverInitError{Reason: "could not find addresses in settings", Cfg: *model}
 	}
 
 	// split addresses with a few different ways
 	addresses := util.SplitEmails(addressesString)
 
 	return &EmailNotifier{
-		NotifierBase: old_notifiers.NewNotifierBase(&models.AlertNotification{
+		Base: NewBase(&models.AlertNotification{
 			Uid:                   model.UID,
 			Name:                  model.Name,
 			Type:                  model.Type,
@@ -56,6 +55,7 @@ func NewEmailNotifier(model *NotificationChannelConfig, t *template.Template) (*
 		SingleEmail: singleEmail,
 		Message:     model.Settings.Get("message").MustString(),
 		log:         log.New("alerting.notifier.email"),
+		ns:          ns,
 		tmpl:        t,
 	}, nil
 }
@@ -65,7 +65,7 @@ func (en *EmailNotifier) Notify(ctx context.Context, as ...*types.Alert) (bool, 
 	var tmplErr error
 	tmpl, data := TmplText(ctx, en.tmpl, as, en.log, &tmplErr)
 
-	title := tmpl(`{{ template "default.title" . }}`)
+	title := tmpl(DefaultMessageTitleEmbed)
 
 	alertPageURL := en.tmpl.ExternalURL.String()
 	ruleURL := en.tmpl.ExternalURL.String()
@@ -97,15 +97,15 @@ func (en *EmailNotifier) Notify(ctx context.Context, as ...*types.Alert) (bool, 
 			},
 			To:          en.Addresses,
 			SingleEmail: en.SingleEmail,
-			Template:    "ng_alert_notification.html",
+			Template:    "ng_alert_notification",
 		},
 	}
 
 	if tmplErr != nil {
-		en.log.Debug("failed to template email message", "err", tmplErr.Error())
+		en.log.Warn("failed to template email message", "err", tmplErr.Error())
 	}
 
-	if err := bus.DispatchCtx(ctx, cmd); err != nil {
+	if err := en.ns.SendEmailCommandHandlerSync(ctx, cmd); err != nil {
 		return false, err
 	}
 

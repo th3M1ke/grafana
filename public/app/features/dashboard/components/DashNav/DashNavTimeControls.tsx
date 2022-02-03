@@ -1,20 +1,20 @@
 // Libraries
 import React, { Component } from 'react';
 import { dateMath, TimeRange, TimeZone } from '@grafana/data';
-import { css } from '@emotion/css';
+import { TimeRangeUpdatedEvent } from '@grafana/runtime';
 
 // Types
 import { DashboardModel } from '../../state';
-import { CoreEvents } from 'app/types';
 
 // Components
-import { defaultIntervals, RefreshPicker, stylesFactory } from '@grafana/ui';
+import { defaultIntervals, RefreshPicker, ToolbarButtonRow } from '@grafana/ui';
 import { TimePickerWithHistory } from 'app/core/components/TimePicker/TimePickerWithHistory';
 
 // Utils & Services
 import { getTimeSrv } from 'app/features/dashboard/services/TimeSrv';
 import { appEvents } from 'app/core/core';
 import { ShiftTimeEvent, ShiftTimeEventPayload, ZoomOutEvent } from '../../../../types/events';
+import { Unsubscribable } from 'rxjs';
 
 export interface Props {
   dashboard: DashboardModel;
@@ -22,20 +22,15 @@ export interface Props {
 }
 
 export class DashNavTimeControls extends Component<Props> {
+  private sub?: Unsubscribable;
+
   componentDidMount() {
-    // Only reason for this is that sometimes time updates can happen via redux location changes
-    // and this happens before timeSrv has had chance to update state (as it listens to angular route-updated)
-    // This can be removed after timeSrv listens redux location
-    this.props.dashboard.on(CoreEvents.timeRangeUpdated, this.triggerForceUpdate);
+    this.sub = this.props.dashboard.events.subscribe(TimeRangeUpdatedEvent, () => this.forceUpdate());
   }
 
   componentWillUnmount() {
-    this.props.dashboard.off(CoreEvents.timeRangeUpdated, this.triggerForceUpdate);
+    this.sub?.unsubscribe();
   }
-
-  triggerForceUpdate = () => {
-    this.forceUpdate();
-  };
 
   onChangeRefreshInterval = (interval: string) => {
     getTimeSrv().setAutoRefresh(interval);
@@ -76,6 +71,11 @@ export class DashNavTimeControls extends Component<Props> {
     this.onRefresh();
   };
 
+  onChangeFiscalYearStartMonth = (month: number) => {
+    this.props.dashboard.fiscalYearStartMonth = month;
+    this.onRefresh();
+  };
+
   onZoom = () => {
     appEvents.publish(new ZoomOutEvent(2));
   };
@@ -87,19 +87,21 @@ export class DashNavTimeControls extends Component<Props> {
 
     const timePickerValue = getTimeSrv().timeRange();
     const timeZone = dashboard.getTimezone();
-    const styles = getStyles();
+    const fiscalYearStartMonth = dashboard.fiscalYearStartMonth;
     const hideIntervalPicker = dashboard.panelInEdit?.isEditing;
 
     return (
-      <div className={styles.container}>
+      <ToolbarButtonRow>
         <TimePickerWithHistory
           value={timePickerValue}
           onChange={this.onChangeTimePicker}
           timeZone={timeZone}
+          fiscalYearStartMonth={fiscalYearStartMonth}
           onMoveBackward={this.onMoveBack}
           onMoveForward={this.onMoveForward}
           onZoom={this.onZoom}
           onChangeTimeZone={this.onChangeTimeZone}
+          onChangeFiscalYearStartMonth={this.onChangeFiscalYearStartMonth}
         />
         <RefreshPicker
           onIntervalChanged={this.onChangeRefreshInterval}
@@ -109,16 +111,7 @@ export class DashNavTimeControls extends Component<Props> {
           tooltip="Refresh dashboard"
           noIntervalPicker={hideIntervalPicker}
         />
-      </div>
+      </ToolbarButtonRow>
     );
   }
 }
-
-const getStyles = stylesFactory(() => {
-  return {
-    container: css`
-      position: relative;
-      display: flex;
-    `,
-  };
-});

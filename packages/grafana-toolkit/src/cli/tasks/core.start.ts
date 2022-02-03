@@ -17,13 +17,11 @@ const startTaskRunner: TaskRunner<StartTaskOptions> = async ({ watchThemes, noTs
     },
     hot
       ? {
-          command:
-            // LOGZ.IO GRAFANA CHANGE :: DEV-18284 Implement grafana watch script
-            'node --max-old-space-size=4096 node_modules/webpack-dev-server/bin/webpack-dev-server.js --progress --colors --config scripts/webpack/webpack.hot.js',
+          command: 'webpack serve --progress --color --config scripts/webpack/webpack.hot.js',
           name: 'Dev server',
         }
       : {
-          command: `webpack --progress --colors --watch --env.noTsCheck=${noTsCheckArg} --config scripts/webpack/webpack.dev.js`,
+          command: `webpack --progress --color --watch --env noTsCheck=${noTsCheckArg} --config scripts/webpack/webpack.dev.js`,
           name: 'Webpack',
         },
   ];

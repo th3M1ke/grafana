@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/grafana/grafana/pkg/bus"
+	"github.com/grafana/grafana/pkg/infra/tracing"
 
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/assert"
@@ -28,20 +29,35 @@ import (
 )
 
 func TestAMConfigAccess(t *testing.T) {
+	_, err := tracing.InitializeTracerForTest()
+	require.NoError(t, err)
+
 	dir, path := testinfra.CreateGrafDir(t, testinfra.GrafanaOpts{
-		EnableFeatureToggles: []string{"ngalert"},
-		DisableAnonymous:     true,
+		DisableLegacyAlerting: true,
+		EnableUnifiedAlerting: true,
+		DisableAnonymous:      true,
 	})
 
-	store := testinfra.SetUpDatabase(t, dir)
+	grafanaListedAddr, store := testinfra.StartGrafana(t, dir, path)
 	// override bus to get the GetSignedInUserQuery handler
 	store.Bus = bus.GetBus()
-	grafanaListedAddr := testinfra.StartGrafana(t, dir, path, store)
 
 	// Create a users to make authenticated requests
-	require.NoError(t, createUser(t, store, models.ROLE_VIEWER, "viewer", "viewer"))
-	require.NoError(t, createUser(t, store, models.ROLE_EDITOR, "editor", "editor"))
-	require.NoError(t, createUser(t, store, models.ROLE_ADMIN, "admin", "admin"))
+	createUser(t, store, models.CreateUserCommand{
+		DefaultOrgRole: string(models.ROLE_VIEWER),
+		Password:       "viewer",
+		Login:          "viewer",
+	})
+	createUser(t, store, models.CreateUserCommand{
+		DefaultOrgRole: string(models.ROLE_EDITOR),
+		Password:       "editor",
+		Login:          "editor",
+	})
+	createUser(t, store, models.CreateUserCommand{
+		DefaultOrgRole: string(models.ROLE_ADMIN),
+		Password:       "admin",
+		Login:          "admin",
+	})
 
 	type testCase struct {
 		desc      string
@@ -84,7 +100,7 @@ func TestAMConfigAccess(t *testing.T) {
 				desc:      "viewer request should fail",
 				url:       "http://viewer:viewer@%s/api/alertmanager/grafana/config/api/v1/alerts",
 				expStatus: http.StatusForbidden,
-				expBody:   `{"message": "permission denied"}`,
+				expBody:   `{"message": "permission denied","error": "permission denied"}`,
 			},
 			{
 				desc:      "editor request should succeed",
@@ -112,6 +128,77 @@ func TestAMConfigAccess(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, tc.expStatus, resp.StatusCode)
 				b, err := ioutil.ReadAll(resp.Body)
+				require.NoError(t, err)
+				require.JSONEq(t, tc.expBody, string(b))
+			})
+		}
+	})
+
+	t.Run("when retrieve alertmanager configuration", func(t *testing.T) {
+		cfgBody := `
+		{
+			"template_files": null,
+			"alertmanager_config": {
+				"route": {
+					"receiver": "grafana-default-email"
+				},
+				"templates": null,
+				"receivers": [{
+					"name": "grafana-default-email",
+					"grafana_managed_receiver_configs": [{
+						"disableResolveMessage": false,
+						"uid": "",
+						"name": "email receiver",
+						"type": "email",
+						"secureFields": {},
+						"settings": {
+							"addresses": "<example@email.com>"
+						}
+					}]
+				}]
+			}
+		}
+		`
+		testCases := []testCase{
+			{
+				desc:      "un-authenticated request should fail",
+				url:       "http://%s/api/alertmanager/grafana/config/api/v1/alerts",
+				expStatus: http.StatusUnauthorized,
+				expBody:   `{"message": "Unauthorized"}`,
+			},
+			{
+				desc:      "viewer request should fail",
+				url:       "http://viewer:viewer@%s/api/alertmanager/grafana/config/api/v1/alerts",
+				expStatus: http.StatusForbidden,
+				expBody:   `{"message": "permission denied","error": "permission denied"}`,
+			},
+			{
+				desc:      "editor request should succeed",
+				url:       "http://editor:editor@%s/api/alertmanager/grafana/config/api/v1/alerts",
+				expStatus: http.StatusOK,
+				expBody:   cfgBody,
+			},
+			{
+				desc:      "admin request should succeed",
+				url:       "http://admin:admin@%s/api/alertmanager/grafana/config/api/v1/alerts",
+				expStatus: http.StatusOK,
+				expBody:   cfgBody,
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.desc, func(t *testing.T) {
+				resp, err := http.Get(fmt.Sprintf(tc.url, grafanaListedAddr))
+				t.Cleanup(func() {
+					require.NoError(t, resp.Body.Close())
+				})
+				require.NoError(t, err)
+				require.Equal(t, tc.expStatus, resp.StatusCode)
+				b, err := ioutil.ReadAll(resp.Body)
+				if tc.expStatus == http.StatusOK {
+					re := regexp.MustCompile(`"uid":"([\w|-]+)"`)
+					b = re.ReplaceAll(b, []byte(`"uid":""`))
+				}
 				require.NoError(t, err)
 				require.JSONEq(t, tc.expBody, string(b))
 			})
@@ -146,7 +233,7 @@ func TestAMConfigAccess(t *testing.T) {
 				desc:      "viewer request should fail",
 				url:       "http://viewer:viewer@%s/api/alertmanager/grafana/api/v2/silences",
 				expStatus: http.StatusForbidden,
-				expBody:   `{"message": "permission denied"}`,
+				expBody:   `{"message": "permission denied","error": "permission denied"}`,
 			},
 			{
 				desc:      "editor request should succeed",
@@ -231,7 +318,7 @@ func TestAMConfigAccess(t *testing.T) {
 	})
 
 	var silences apimodels.GettableSilences
-	err := json.Unmarshal(blob, &silences)
+	err = json.Unmarshal(blob, &silences)
 	require.NoError(t, err)
 	assert.Len(t, silences, 2)
 	silenceIDs := make([]string, 0, len(silences))
@@ -252,7 +339,7 @@ func TestAMConfigAccess(t *testing.T) {
 				desc:      "viewer request should fail",
 				url:       "http://viewer:viewer@%s/api/alertmanager/grafana/api/v2/silence/%s",
 				expStatus: http.StatusForbidden,
-				expBody:   `{"message": "permission denied"}`,
+				expBody:   `{"message": "permission denied","error": "permission denied"}`,
 			},
 			{
 				desc:      "editor request should succeed",
@@ -304,15 +391,18 @@ func TestAMConfigAccess(t *testing.T) {
 }
 
 func TestAlertAndGroupsQuery(t *testing.T) {
+	_, err := tracing.InitializeTracerForTest()
+	require.NoError(t, err)
+
 	dir, path := testinfra.CreateGrafDir(t, testinfra.GrafanaOpts{
-		EnableFeatureToggles: []string{"ngalert"},
-		DisableAnonymous:     true,
+		DisableLegacyAlerting: true,
+		EnableUnifiedAlerting: true,
+		DisableAnonymous:      true,
 	})
 
-	store := testinfra.SetUpDatabase(t, dir)
+	grafanaListedAddr, store := testinfra.StartGrafana(t, dir, path)
 	// override bus to get the GetSignedInUserQuery handler
 	store.Bus = bus.GetBus()
-	grafanaListedAddr := testinfra.StartGrafana(t, dir, path, store)
 
 	// unauthenticated request to get the alerts should fail
 	{
@@ -331,7 +421,11 @@ func TestAlertAndGroupsQuery(t *testing.T) {
 	}
 
 	// Create a user to make authenticated requests
-	require.NoError(t, createUser(t, store, models.ROLE_EDITOR, "grafana", "password"))
+	createUser(t, store, models.CreateUserCommand{
+		DefaultOrgRole: string(models.ROLE_EDITOR),
+		Password:       "password",
+		Login:          "grafana",
+	})
 
 	// invalid credentials request to get the alerts should fail
 	{
@@ -465,27 +559,41 @@ func TestAlertAndGroupsQuery(t *testing.T) {
 }
 
 func TestRulerAccess(t *testing.T) {
+	_, err := tracing.InitializeTracerForTest()
+	require.NoError(t, err)
 	// Setup Grafana and its Database
 	dir, path := testinfra.CreateGrafDir(t, testinfra.GrafanaOpts{
-		EnableFeatureToggles: []string{"ngalert"},
-		EnableQuota:          true,
-		DisableAnonymous:     true,
-		ViewersCanEdit:       true,
+		DisableLegacyAlerting: true,
+		EnableUnifiedAlerting: true,
+		EnableQuota:           true,
+		DisableAnonymous:      true,
+		ViewersCanEdit:        true,
 	})
 
-	store := testinfra.SetUpDatabase(t, dir)
+	grafanaListedAddr, store := testinfra.StartGrafana(t, dir, path)
 	// override bus to get the GetSignedInUserQuery handler
 	store.Bus = bus.GetBus()
-	grafanaListedAddr := testinfra.StartGrafana(t, dir, path, store)
 
 	// Create the namespace we'll save our alerts to.
-	_, err := createFolder(t, store, 0, "default")
+	_, err = createFolder(t, store, 0, "default")
 	require.NoError(t, err)
 
 	// Create a users to make authenticated requests
-	require.NoError(t, createUser(t, store, models.ROLE_VIEWER, "viewer", "viewer"))
-	require.NoError(t, createUser(t, store, models.ROLE_EDITOR, "editor", "editor"))
-	require.NoError(t, createUser(t, store, models.ROLE_ADMIN, "admin", "admin"))
+	createUser(t, store, models.CreateUserCommand{
+		DefaultOrgRole: string(models.ROLE_VIEWER),
+		Password:       "viewer",
+		Login:          "viewer",
+	})
+	createUser(t, store, models.CreateUserCommand{
+		DefaultOrgRole: string(models.ROLE_EDITOR),
+		Password:       "editor",
+		Login:          "editor",
+	})
+	createUser(t, store, models.CreateUserCommand{
+		DefaultOrgRole: string(models.ROLE_ADMIN),
+		Password:       "admin",
+		Login:          "admin",
+	})
 
 	// Now, let's test the access policies.
 	testCases := []struct {
@@ -504,7 +612,7 @@ func TestRulerAccess(t *testing.T) {
 			desc:             "viewer request should fail",
 			url:              "http://viewer:viewer@%s/api/ruler/grafana/api/v1/rules/default",
 			expStatus:        http.StatusForbidden,
-			expectedResponse: `{"message":"user does not have permissions to edit the namespace: user does not have permissions to edit the namespace"}`,
+			expectedResponse: `{"message": "user does not have permissions to edit the namespace: user does not have permissions to edit the namespace","error":"user does not have permissions to edit the namespace: user does not have permissions to edit the namespace"}`,
 		},
 		{
 			desc:             "editor request should succeed",
@@ -580,25 +688,35 @@ func TestRulerAccess(t *testing.T) {
 }
 
 func TestDeleteFolderWithRules(t *testing.T) {
+	_, err := tracing.InitializeTracerForTest()
+	require.NoError(t, err)
 	// Setup Grafana and its Database
 	dir, path := testinfra.CreateGrafDir(t, testinfra.GrafanaOpts{
-		EnableFeatureToggles: []string{"ngalert"},
-		EnableQuota:          true,
-		DisableAnonymous:     true,
-		ViewersCanEdit:       true,
+		DisableLegacyAlerting: true,
+		EnableUnifiedAlerting: true,
+		EnableQuota:           true,
+		DisableAnonymous:      true,
+		ViewersCanEdit:        true,
 	})
 
-	store := testinfra.SetUpDatabase(t, dir)
+	grafanaListedAddr, store := testinfra.StartGrafana(t, dir, path)
 	// override bus to get the GetSignedInUserQuery handler
 	store.Bus = bus.GetBus()
-	grafanaListedAddr := testinfra.StartGrafana(t, dir, path, store)
 
 	// Create the namespace we'll save our alerts to.
 	namespaceUID, err := createFolder(t, store, 0, "default")
 	require.NoError(t, err)
 
-	require.NoError(t, createUser(t, store, models.ROLE_VIEWER, "viewer", "viewer"))
-	require.NoError(t, createUser(t, store, models.ROLE_EDITOR, "editor", "editor"))
+	createUser(t, store, models.CreateUserCommand{
+		DefaultOrgRole: string(models.ROLE_VIEWER),
+		Password:       "viewer",
+		Login:          "viewer",
+	})
+	createUser(t, store, models.CreateUserCommand{
+		DefaultOrgRole: string(models.ROLE_EDITOR),
+		Password:       "editor",
+		Login:          "editor",
+	})
 
 	createRule(t, grafanaListedAddr, "default", "editor", "editor")
 
@@ -615,7 +733,7 @@ func TestDeleteFolderWithRules(t *testing.T) {
 		b, err := ioutil.ReadAll(resp.Body)
 		require.NoError(t, err)
 
-		assert.Equal(t, 202, resp.StatusCode)
+		assert.Equal(t, 200, resp.StatusCode)
 
 		re := regexp.MustCompile(`"uid":"([\w|-]+)"`)
 		b = re.ReplaceAll(b, []byte(`"uid":""`))
@@ -677,9 +795,27 @@ func TestDeleteFolderWithRules(t *testing.T) {
 		assert.JSONEq(t, expectedGetRulesResponseBody, string(b))
 	}
 
-	// Next, the editor can delete the folder.
+	// Next, the editor can not delete the folder because it contains Grafana 8 alerts.
 	{
 		u := fmt.Sprintf("http://editor:editor@%s/api/folders/%s", grafanaListedAddr, namespaceUID)
+		req, err := http.NewRequest(http.MethodDelete, u, nil)
+		require.NoError(t, err)
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			err := resp.Body.Close()
+			require.NoError(t, err)
+		})
+		b, err := ioutil.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+		require.JSONEq(t, `{"message":"folder cannot be deleted: folder contains alert rules"}`, string(b))
+	}
+
+	// Next, the editor can delete the folder if forceDeleteRules is true.
+	{
+		u := fmt.Sprintf("http://editor:editor@%s/api/folders/%s?forceDeleteRules=true", grafanaListedAddr, namespaceUID)
 		req, err := http.NewRequest(http.MethodDelete, u, nil)
 		require.NoError(t, err)
 		client := &http.Client{}
@@ -708,27 +844,31 @@ func TestDeleteFolderWithRules(t *testing.T) {
 		b, err := ioutil.ReadAll(resp.Body)
 		require.NoError(t, err)
 
-		assert.Equal(t, 202, resp.StatusCode)
+		assert.Equal(t, 200, resp.StatusCode)
 		assert.JSONEq(t, "{}", string(b))
 	}
 }
 
 func TestAlertRuleCRUD(t *testing.T) {
+	_, err := tracing.InitializeTracerForTest()
+	require.NoError(t, err)
 	// Setup Grafana and its Database
 	dir, path := testinfra.CreateGrafDir(t, testinfra.GrafanaOpts{
-		EnableFeatureToggles: []string{"ngalert"},
-		EnableQuota:          true,
-		DisableAnonymous:     true,
+		DisableLegacyAlerting: true,
+		EnableUnifiedAlerting: true,
+		EnableQuota:           true,
+		DisableAnonymous:      true,
 	})
 
-	store := testinfra.SetUpDatabase(t, dir)
+	grafanaListedAddr, store := testinfra.StartGrafana(t, dir, path)
 	// override bus to get the GetSignedInUserQuery handler
 	store.Bus = bus.GetBus()
-	grafanaListedAddr := testinfra.StartGrafana(t, dir, path, store)
 
-	err := createUser(t, store, models.ROLE_EDITOR, "grafana", "password")
-
-	require.NoError(t, err)
+	createUser(t, store, models.CreateUserCommand{
+		DefaultOrgRole: string(models.ROLE_EDITOR),
+		Password:       "password",
+		Login:          "grafana",
+	})
 
 	// Create the namespace we'll save our alerts to.
 	_, err = createFolder(t, store, 0, "default")
@@ -763,7 +903,7 @@ func TestAlertRuleCRUD(t *testing.T) {
 						Data:  []ngmodels.AlertQuery{},
 					},
 				},
-				expectedResponse: `{"message":"failed to update rule group: invalid alert rule: no queries or expressions are found"}`,
+				expectedResponse: `{"message": "failed to update rule group: invalid alert rule: no queries or expressions are found","error":"failed to update rule group: invalid alert rule: no queries or expressions are found"}`,
 			},
 			{
 				desc:      "alert rule with empty title",
@@ -793,7 +933,7 @@ func TestAlertRuleCRUD(t *testing.T) {
 						},
 					},
 				},
-				expectedResponse: `{"message":"failed to update rule group: invalid alert rule: title is empty"}`,
+				expectedResponse: `{"message": "failed to update rule group: invalid alert rule: title is empty","error":"failed to update rule group: invalid alert rule: title is empty"}`,
 			},
 			{
 				desc:      "alert rule with too long name",
@@ -823,7 +963,7 @@ func TestAlertRuleCRUD(t *testing.T) {
 						},
 					},
 				},
-				expectedResponse: `{"message":"failed to update rule group: invalid alert rule: name length should not be greater than 190"}`,
+				expectedResponse: `{"message": "failed to update rule group: invalid alert rule: name length should not be greater than 190","error":"failed to update rule group: invalid alert rule: name length should not be greater than 190"}`,
 			},
 			{
 				desc:      "alert rule with too long rulegroup",
@@ -853,7 +993,7 @@ func TestAlertRuleCRUD(t *testing.T) {
 						},
 					},
 				},
-				expectedResponse: `{"message":"failed to update rule group: invalid alert rule: rule group name length should not be greater than 190"}`,
+				expectedResponse: `{"message": "failed to update rule group: invalid alert rule: rule group name length should not be greater than 190","error":"failed to update rule group: invalid alert rule: rule group name length should not be greater than 190"}`,
 			},
 			{
 				desc:      "alert rule with invalid interval",
@@ -884,7 +1024,7 @@ func TestAlertRuleCRUD(t *testing.T) {
 						},
 					},
 				},
-				expectedResponse: `{"message":"failed to update rule group: invalid alert rule: interval (1s) should be non-zero and divided exactly by scheduler interval: 10s"}`,
+				expectedResponse: `{"message": "failed to update rule group: invalid alert rule: interval (1s) should be non-zero and divided exactly by scheduler interval: 10s","error":"failed to update rule group: invalid alert rule: interval (1s) should be non-zero and divided exactly by scheduler interval: 10s"}`,
 			},
 			{
 				desc:      "alert rule with unknown datasource",
@@ -914,7 +1054,7 @@ func TestAlertRuleCRUD(t *testing.T) {
 						},
 					},
 				},
-				expectedResponse: `{"message":"failed to validate alert rule AlwaysFiring: invalid query A: data source not found: unknown"}`,
+				expectedResponse: `{"message": "failed to validate alert rule \"AlwaysFiring\": invalid query A: data source not found: unknown","error":"failed to validate alert rule \"AlwaysFiring\": invalid query A: data source not found: unknown"}`,
 			},
 			{
 				desc:      "alert rule with invalid condition",
@@ -944,7 +1084,7 @@ func TestAlertRuleCRUD(t *testing.T) {
 						},
 					},
 				},
-				expectedResponse: `{"message":"failed to validate alert rule AlwaysFiring: condition B not found in any query or expression: it should be one of: [A]"}`,
+				expectedResponse: `{"message": "failed to validate alert rule \"AlwaysFiring\": condition B not found in any query or expression: it should be one of: [A]","error":"failed to validate alert rule \"AlwaysFiring\": condition B not found in any query or expression: it should be one of: [A]"}`,
 			},
 		}
 
@@ -1215,6 +1355,7 @@ func TestAlertRuleCRUD(t *testing.T) {
 					},
 				},
 			},
+			Interval: interval,
 		}
 		buf := bytes.Buffer{}
 		enc := json.NewEncoder(&buf)
@@ -1233,7 +1374,128 @@ func TestAlertRuleCRUD(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
-		require.JSONEq(t, `{"message":"failed to update rule group: failed to get alert rule unknown: could not find alert rule"}`, string(b))
+		require.JSONEq(t, `{"message": "failed to update rule group: failed to get alert rule unknown: could not find alert rule","error":"failed to update rule group: failed to get alert rule unknown: could not find alert rule"}`, string(b))
+
+		// let's make sure that rule definitions are not affected by the failed POST request.
+		u = fmt.Sprintf("http://grafana:password@%s/api/ruler/grafana/api/v1/rules/default", grafanaListedAddr)
+		// nolint:gosec
+		resp, err = http.Get(u)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			err := resp.Body.Close()
+			require.NoError(t, err)
+		})
+		b, err = ioutil.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		assert.Equal(t, resp.StatusCode, 202)
+
+		body, m := rulesNamespaceWithoutVariableValues(t, b)
+		returnedUIDs, ok := m["default,arulegroup"]
+		assert.True(t, ok)
+		assert.Equal(t, 2, len(returnedUIDs))
+		assert.JSONEq(t, expectedGetNamespaceResponseBody, body)
+	}
+
+	// try to update by pass two rules with conflicting UIDs
+	{
+		forValue, err := model.ParseDuration("30s")
+		require.NoError(t, err)
+
+		rules := apimodels.PostableRuleGroupConfig{
+			Name: "arulegroup",
+			Rules: []apimodels.PostableExtendedRuleNode{
+				{
+					ApiRuleNode: &apimodels.ApiRuleNode{
+						For: forValue,
+						Labels: map[string]string{
+							// delete foo label
+							"label1": "val1", // update label value
+							"label2": "val2", // new label
+						},
+						Annotations: map[string]string{
+							// delete foo annotation
+							"annotation1": "val1", // update annotation value
+							"annotation2": "val2", // new annotation
+						},
+					},
+					GrafanaManagedAlert: &apimodels.PostableGrafanaRule{
+						UID:       ruleUID,
+						Title:     "AlwaysNormal",
+						Condition: "A",
+						Data: []ngmodels.AlertQuery{
+							{
+								RefID: "A",
+								RelativeTimeRange: ngmodels.RelativeTimeRange{
+									From: ngmodels.Duration(time.Duration(5) * time.Hour),
+									To:   ngmodels.Duration(time.Duration(3) * time.Hour),
+								},
+								DatasourceUID: "-100",
+								Model: json.RawMessage(`{
+												"type": "math",
+												"expression": "2 + 3 < 1"
+												}`),
+							},
+						},
+						NoDataState:  apimodels.NoDataState(ngmodels.Alerting),
+						ExecErrState: apimodels.ExecutionErrorState(ngmodels.AlertingErrState),
+					},
+				},
+				{
+					ApiRuleNode: &apimodels.ApiRuleNode{
+						For: interval,
+						Labels: map[string]string{
+							"label1": "val42",
+							"foo":    "bar",
+						},
+						Annotations: map[string]string{
+							"annotation1": "val42",
+							"foo":         "bar",
+						},
+					},
+					GrafanaManagedAlert: &apimodels.PostableGrafanaRule{
+						UID:       ruleUID,
+						Title:     "AlwaysAlerting",
+						Condition: "A",
+						Data: []ngmodels.AlertQuery{
+							{
+								RefID: "A",
+								RelativeTimeRange: ngmodels.RelativeTimeRange{
+									From: ngmodels.Duration(time.Duration(5) * time.Hour),
+									To:   ngmodels.Duration(time.Duration(3) * time.Hour),
+								},
+								DatasourceUID: "-100",
+								Model: json.RawMessage(`{
+												"type": "math",
+												"expression": "2 + 3 > 1"
+												}`),
+							},
+						},
+						NoDataState:  apimodels.NoDataState(ngmodels.Alerting),
+						ExecErrState: apimodels.ExecutionErrorState(ngmodels.AlertingErrState),
+					},
+				},
+			},
+			Interval: interval,
+		}
+		buf := bytes.Buffer{}
+		enc := json.NewEncoder(&buf)
+		err = enc.Encode(&rules)
+		require.NoError(t, err)
+
+		u := fmt.Sprintf("http://grafana:password@%s/api/ruler/grafana/api/v1/rules/default", grafanaListedAddr)
+		// nolint:gosec
+		resp, err := http.Post(u, "application/json", &buf)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			err := resp.Body.Close()
+			require.NoError(t, err)
+		})
+		b, err := ioutil.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+		require.JSONEq(t, fmt.Sprintf(`{"message": "failed to validate alert rule \"AlwaysAlerting\": conflicting UID \"%s\" found","error":"failed to validate alert rule \"AlwaysAlerting\": conflicting UID \"%s\" found"}`, ruleUID, ruleUID), string(b))
 
 		// let's make sure that rule definitions are not affected by the failed POST request.
 		u = fmt.Sprintf("http://grafana:password@%s/api/ruler/grafana/api/v1/rules/default", grafanaListedAddr)
@@ -1638,7 +1900,7 @@ func TestAlertRuleCRUD(t *testing.T) {
 			require.NoError(t, err)
 
 			require.Equal(t, http.StatusNotFound, resp.StatusCode)
-			require.JSONEq(t, `{"message":"failed to delete rule group: rule group not found under this namespace"}`, string(b))
+			require.JSONEq(t, `{"message": "failed to delete rule group: rule group not found under this namespace","error":"failed to delete rule group: rule group not found under this namespace"}`, string(b))
 		})
 
 		t.Run("succeed if the rule group name does exist", func(t *testing.T) {
@@ -1660,34 +1922,127 @@ func TestAlertRuleCRUD(t *testing.T) {
 	}
 }
 
-func TestQuota(t *testing.T) {
+func TestAlertmanagerStatus(t *testing.T) {
 	// Setup Grafana and its Database
 	dir, path := testinfra.CreateGrafDir(t, testinfra.GrafanaOpts{
-		EnableFeatureToggles: []string{"ngalert"},
-		EnableQuota:          true,
-		DisableAnonymous:     true,
+		DisableLegacyAlerting: true,
+		EnableUnifiedAlerting: true,
 	})
 
-	store := testinfra.SetUpDatabase(t, dir)
+	grafanaListedAddr, _ := testinfra.StartGrafana(t, dir, path)
+
+	// Get the Alertmanager current status.
+	{
+		alertsURL := fmt.Sprintf("http://%s/api/alertmanager/grafana/api/v2/status", grafanaListedAddr)
+		// nolint:gosec
+		resp, err := http.Get(alertsURL)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			err := resp.Body.Close()
+			require.NoError(t, err)
+		})
+		b, err := ioutil.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.Equal(t, 200, resp.StatusCode)
+		require.JSONEq(t, `
+{
+	"cluster": {
+		"peers": [],
+		"status": "disabled"
+	},
+	"config": {
+		"route": {
+			"receiver": "grafana-default-email"
+		},
+		"templates": null,
+		"receivers": [{
+			"name": "grafana-default-email",
+			"grafana_managed_receiver_configs": [{
+				"uid": "",
+				"name": "email receiver",
+				"type": "email",
+				"disableResolveMessage": false,
+				"settings": {
+					"addresses": "\u003cexample@email.com\u003e"
+				},
+				"secureSettings": null
+			}]
+		}]
+	},
+	"uptime": null,
+	"versionInfo": {
+		"branch": "N/A",
+		"buildDate": "N/A",
+		"buildUser": "N/A",
+		"goVersion": "N/A",
+		"revision": "N/A",
+		"version": "N/A"
+	}
+}
+`, string(b))
+	}
+}
+
+func TestQuota(t *testing.T) {
+	_, err := tracing.InitializeTracerForTest()
+	require.NoError(t, err)
+	// Setup Grafana and its Database
+	dir, path := testinfra.CreateGrafDir(t, testinfra.GrafanaOpts{
+		DisableLegacyAlerting: true,
+		EnableUnifiedAlerting: true,
+		EnableQuota:           true,
+		DisableAnonymous:      true,
+	})
+
+	grafanaListedAddr, store := testinfra.StartGrafana(t, dir, path)
 	// override bus to get the GetSignedInUserQuery handler
 	store.Bus = bus.GetBus()
-	grafanaListedAddr := testinfra.StartGrafana(t, dir, path, store)
 
 	// Create the namespace we'll save our alerts to.
-	_, err := createFolder(t, store, 0, "default")
+	_, err = createFolder(t, store, 0, "default")
 	require.NoError(t, err)
 
 	// Create a user to make authenticated requests
-	require.NoError(t, createUser(t, store, models.ROLE_EDITOR, "grafana", "password"))
+	createUser(t, store, models.CreateUserCommand{
+		DefaultOrgRole: string(models.ROLE_EDITOR),
+		Password:       "password",
+		Login:          "grafana",
+	})
 
 	interval, err := model.ParseDuration("1m")
 	require.NoError(t, err)
 
+	// Create rule under folder1
+	createRule(t, grafanaListedAddr, "default", "grafana", "password")
+
+	// get the generated rule UID
+	var ruleUID string
+	{
+		u := fmt.Sprintf("http://grafana:password@%s/api/ruler/grafana/api/v1/rules/default", grafanaListedAddr)
+		// nolint:gosec
+		resp, err := http.Get(u)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			err := resp.Body.Close()
+			require.NoError(t, err)
+		})
+		b, err := ioutil.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		assert.Equal(t, resp.StatusCode, 202)
+
+		_, m := rulesNamespaceWithoutVariableValues(t, b)
+		generatedUIDs, ok := m["default,arulegroup"]
+		assert.True(t, ok)
+		assert.Equal(t, 1, len(generatedUIDs))
+		ruleUID = generatedUIDs[0]
+	}
+
 	// check quota limits
-	t.Run("when quota limit exceed", func(t *testing.T) {
+	t.Run("when quota limit exceed creating new rule should fail", func(t *testing.T) {
 		// get existing org quota
 		query := models.GetOrgQuotaByTargetQuery{OrgId: 1, Target: "alert_rule"}
-		err = sqlstore.GetOrgQuotaByTarget(&query)
+		err = store.GetOrgQuotaByTarget(context.Background(), &query)
 		require.NoError(t, err)
 		used := query.Result.Used
 		limit := query.Result.Limit
@@ -1698,7 +2053,7 @@ func TestQuota(t *testing.T) {
 			Target: "alert_rule",
 			Limit:  used,
 		}
-		err := sqlstore.UpdateOrgQuota(&orgCmd)
+		err := store.UpdateOrgQuota(context.Background(), &orgCmd)
 		require.NoError(t, err)
 
 		t.Cleanup(func() {
@@ -1708,7 +2063,7 @@ func TestQuota(t *testing.T) {
 				Target: "alert_rule",
 				Limit:  limit,
 			}
-			err := sqlstore.UpdateOrgQuota(&orgCmd)
+			err := store.UpdateOrgQuota(context.Background(), &orgCmd)
 			require.NoError(t, err)
 		})
 
@@ -1728,8 +2083,8 @@ func TestQuota(t *testing.T) {
 									From: ngmodels.Duration(time.Duration(5) * time.Hour),
 									To:   ngmodels.Duration(time.Duration(3) * time.Hour),
 								},
+								DatasourceUID: "-100",
 								Model: json.RawMessage(`{
-									"datasourceUid": "-100",
 									"type": "math",
 									"expression": "2 + 3 > 1"
 									}`),
@@ -1754,29 +2109,148 @@ func TestQuota(t *testing.T) {
 		})
 		b, err := ioutil.ReadAll(resp.Body)
 		require.NoError(t, err)
-
 		assert.Equal(t, http.StatusForbidden, resp.StatusCode)
-		require.JSONEq(t, `{"message":"quota reached"}`, string(b))
+		require.JSONEq(t, `{"message": "quota reached","error":"quota reached"}`, string(b))
+	})
+
+	t.Run("when quota limit exceed updating existing rule should succeed", func(t *testing.T) {
+		// try to create an alert rule
+		rules := apimodels.PostableRuleGroupConfig{
+			Name:     "arulegroup",
+			Interval: interval,
+			Rules: []apimodels.PostableExtendedRuleNode{
+				{
+					GrafanaManagedAlert: &apimodels.PostableGrafanaRule{
+						Title:     "Updated alert rule",
+						Condition: "A",
+						Data: []ngmodels.AlertQuery{
+							{
+								RefID: "A",
+								RelativeTimeRange: ngmodels.RelativeTimeRange{
+									From: ngmodels.Duration(time.Duration(5) * time.Hour),
+									To:   ngmodels.Duration(time.Duration(3) * time.Hour),
+								},
+								DatasourceUID: "-100",
+								Model: json.RawMessage(`{
+									"type": "math",
+									"expression": "2 + 4 > 1"
+									}`),
+							},
+						},
+						UID: ruleUID,
+					},
+				},
+			},
+		}
+		buf := bytes.Buffer{}
+		enc := json.NewEncoder(&buf)
+		err = enc.Encode(&rules)
+		require.NoError(t, err)
+
+		u := fmt.Sprintf("http://grafana:password@%s/api/ruler/grafana/api/v1/rules/default", grafanaListedAddr)
+		// nolint:gosec
+		resp, err := http.Post(u, "application/json", &buf)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			err := resp.Body.Close()
+			require.NoError(t, err)
+		})
+		b, err := ioutil.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusAccepted, resp.StatusCode)
+		require.JSONEq(t, `{"message":"rule group updated successfully"}`, string(b))
+
+		// let's make sure that rule definitions are updated correctly.
+		u = fmt.Sprintf("http://grafana:password@%s/api/ruler/grafana/api/v1/rules/default", grafanaListedAddr)
+		// nolint:gosec
+		resp, err = http.Get(u)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			err := resp.Body.Close()
+			require.NoError(t, err)
+		})
+		b, err = ioutil.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		assert.Equal(t, resp.StatusCode, 202)
+
+		body, m := rulesNamespaceWithoutVariableValues(t, b)
+		returnedUIDs, ok := m["default,arulegroup"]
+		assert.True(t, ok)
+		assert.Equal(t, 1, len(returnedUIDs))
+		assert.Equal(t, ruleUID, returnedUIDs[0])
+		assert.JSONEq(t, `
+				{
+				   "default":[
+				      {
+					 "name":"arulegroup",
+					 "interval":"1m",
+					 "rules":[
+					    {
+					       "expr":"",
+					       "grafana_alert":{
+						  "id":1,
+						  "orgId":1,
+						  "title":"Updated alert rule",
+						  "condition":"A",
+						  "data":[
+						     {
+							"refId":"A",
+							"queryType":"",
+							"relativeTimeRange":{
+							   "from":18000,
+							   "to":10800
+							},
+							"datasourceUid":"-100",
+										"model":{
+							   "expression":"2 + 4 \u003E 1",
+							   "intervalMs":1000,
+							   "maxDataPoints":43200,
+							   "type":"math"
+							}
+						     }
+						  ],
+						  "updated":"2021-02-21T01:10:30Z",
+						  "intervalSeconds":60,
+						  "version":2,
+						  "uid":"uid",
+						  "namespace_uid":"nsuid",
+						  "namespace_id":1,
+						  "rule_group":"arulegroup",
+						  "no_data_state":"NoData",
+						  "exec_err_state":"Alerting"
+					       }
+					    }
+					 ]
+				      }
+				   ]
+				}`, body)
 	})
 }
 
 func TestEval(t *testing.T) {
+	_, err := tracing.InitializeTracerForTest()
+	require.NoError(t, err)
 	// Setup Grafana and its Database
 	dir, path := testinfra.CreateGrafDir(t, testinfra.GrafanaOpts{
-		EnableFeatureToggles: []string{"ngalert"},
-		EnableQuota:          true,
-		DisableAnonymous:     true,
+		DisableLegacyAlerting: true,
+		EnableUnifiedAlerting: true,
+		EnableQuota:           true,
+		DisableAnonymous:      true,
 	})
 
-	store := testinfra.SetUpDatabase(t, dir)
+	grafanaListedAddr, store := testinfra.StartGrafana(t, dir, path)
 	// override bus to get the GetSignedInUserQuery handler
 	store.Bus = bus.GetBus()
-	grafanaListedAddr := testinfra.StartGrafana(t, dir, path, store)
 
-	require.NoError(t, createUser(t, store, models.ROLE_EDITOR, "grafana", "password"))
+	createUser(t, store, models.CreateUserCommand{
+		DefaultOrgRole: string(models.ROLE_EDITOR),
+		Password:       "password",
+		Login:          "grafana",
+	})
 
 	// Create the namespace we'll save our alerts to.
-	_, err := createFolder(t, store, 0, "default")
+	_, err = createFolder(t, store, 0, "default")
 	require.NoError(t, err)
 
 	// test eval conditions
@@ -1933,7 +2407,7 @@ func TestEval(t *testing.T) {
 			}
 			`,
 			expectedStatusCode: http.StatusBadRequest,
-			expectedResponse:   `{"message":"invalid condition: condition B not found in any query or expression: it should be one of: [A]"}`,
+			expectedResponse:   `{"message": "invalid condition: condition B not found in any query or expression: it should be one of: [A]","error":"invalid condition: condition B not found in any query or expression: it should be one of: [A]"}`,
 		},
 		{
 			desc: "unknown query datasource",
@@ -1958,7 +2432,7 @@ func TestEval(t *testing.T) {
 			}
 			`,
 			expectedStatusCode: http.StatusBadRequest,
-			expectedResponse:   `{"message":"invalid condition: invalid query A: data source not found: unknown"}`,
+			expectedResponse:   `{"message": "invalid condition: invalid query A: data source not found: unknown","error":"invalid condition: invalid query A: data source not found: unknown"}`,
 		},
 	}
 
@@ -2114,7 +2588,7 @@ func TestEval(t *testing.T) {
 			}
 			`,
 			expectedStatusCode: http.StatusBadRequest,
-			expectedResponse:   `{"message":"invalid queries or expressions: invalid query A: data source not found: unknown"}`,
+			expectedResponse:   `{"message": "invalid queries or expressions: invalid query A: data source not found: unknown","error":"invalid queries or expressions: invalid query A: data source not found: unknown"}`,
 		},
 	}
 
@@ -2190,16 +2664,18 @@ func rulesNamespaceWithoutVariableValues(t *testing.T, b []byte) (string, map[st
 	return string(json), m
 }
 
-func createUser(t *testing.T, store *sqlstore.SQLStore, role models.RoleType, username, password string) error {
+func createUser(t *testing.T, store *sqlstore.SQLStore, cmd models.CreateUserCommand) int64 {
 	t.Helper()
 
-	cmd := models.CreateUserCommand{
-		Login:          username,
-		Password:       password,
-		DefaultOrgRole: string(role),
-	}
-	_, err := store.CreateUser(context.Background(), cmd)
-	return err
+	u, err := store.CreateUser(context.Background(), cmd)
+	require.NoError(t, err)
+	return u.Id
+}
+
+func createOrg(t *testing.T, store *sqlstore.SQLStore, name string, userID int64) int64 {
+	org, err := store.CreateOrgWithMember(name, userID)
+	require.NoError(t, err)
+	return org.Id
 }
 
 func getLongString(t *testing.T, n int) string {

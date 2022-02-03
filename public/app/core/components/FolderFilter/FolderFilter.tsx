@@ -1,10 +1,10 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { css } from '@emotion/css';
 import debounce from 'debounce-promise';
-import { AsyncMultiSelect, Icon, resetSelectStyles, useStyles2 } from '@grafana/ui';
+import { AsyncMultiSelect, Icon, useStyles2 } from '@grafana/ui';
 import { GrafanaTheme2, SelectableValue } from '@grafana/data';
 
-import { FolderInfo } from 'app/types';
+import { FolderInfo, PermissionLevelString } from 'app/types';
 import { getBackendSrv } from 'app/core/services/backend_srv';
 
 export interface FolderFilterProps {
@@ -36,7 +36,6 @@ export function FolderFilter({ onChange: propsOnChange, maxMenuHeight }: FolderF
     isMulti: true,
     noOptionsMessage: 'No folders found',
     placeholder: 'Filter by folder',
-    styles: resetSelectStyles(),
     maxMenuHeight,
     value,
     onChange,
@@ -50,6 +49,7 @@ export function FolderFilter({ onChange: propsOnChange, maxMenuHeight }: FolderF
         </span>
       )}
       <AsyncMultiSelect
+        menuShouldPortal
         {...selectOptions}
         isLoading={loading}
         loadOptions={debouncedLoadOptions}
@@ -66,7 +66,7 @@ async function getFoldersAsOptions(searchString: string, setLoading: (loading: b
   const params = {
     query: searchString,
     type: 'dash-folder',
-    permission: 'View',
+    permission: PermissionLevelString.View,
   };
 
   const searchHits = await getBackendSrv().search(params);

@@ -9,21 +9,25 @@ import (
 
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/models"
-	"github.com/grafana/grafana/pkg/services/alerting"
-	old_notifiers "github.com/grafana/grafana/pkg/services/alerting/notifiers"
 	"github.com/prometheus/alertmanager/template"
 	"github.com/prometheus/alertmanager/types"
 )
 
-// NewAlertmanagerNotifier returns a new Alertmanager notifier.
-func NewAlertmanagerNotifier(model *NotificationChannelConfig, t *template.Template) (*AlertmanagerNotifier, error) {
-	if model.Settings == nil {
-		return nil, alerting.ValidationError{Reason: "No settings supplied"}
-	}
+// GetDecryptedValueFn is a function that returns the decrypted value of
+// the given key. If the key is not present, then it returns the fallback value.
+type GetDecryptedValueFn func(ctx context.Context, sjd map[string][]byte, key string, fallback string) string
 
+// NewAlertmanagerNotifier returns a new Alertmanager notifier.
+func NewAlertmanagerNotifier(model *NotificationChannelConfig, _ *template.Template, fn GetDecryptedValueFn) (*AlertmanagerNotifier, error) {
+	if model.Settings == nil {
+		return nil, receiverInitError{Reason: "no settings supplied"}
+	}
+	if model.SecureSettings == nil {
+		return nil, receiverInitError{Cfg: *model, Reason: "no secure settings supplied"}
+	}
 	urlStr := model.Settings.Get("url").MustString()
 	if urlStr == "" {
-		return nil, alerting.ValidationError{Reason: "Could not find url property in settings"}
+		return nil, receiverInitError{Reason: "could not find url property in settings", Cfg: *model}
 	}
 
 	var urls []*url.URL
@@ -36,16 +40,16 @@ func NewAlertmanagerNotifier(model *NotificationChannelConfig, t *template.Templ
 		uS = strings.TrimSuffix(uS, "/") + "/api/v1/alerts"
 		u, err := url.Parse(uS)
 		if err != nil {
-			return nil, alerting.ValidationError{Reason: "Invalid url property in settings"}
+			return nil, receiverInitError{Reason: "invalid url property in settings", Cfg: *model, Err: err}
 		}
 
 		urls = append(urls, u)
 	}
 	basicAuthUser := model.Settings.Get("basicAuthUser").MustString()
-	basicAuthPassword := model.DecryptedValue("basicAuthPassword", model.Settings.Get("basicAuthPassword").MustString())
+	basicAuthPassword := fn(context.Background(), model.SecureSettings, "basicAuthPassword", model.Settings.Get("basicAuthPassword").MustString())
 
 	return &AlertmanagerNotifier{
-		NotifierBase: old_notifiers.NewNotifierBase(&models.AlertNotification{
+		Base: NewBase(&models.AlertNotification{
 			Uid:                   model.UID,
 			Name:                  model.Name,
 			DisableResolveMessage: model.DisableResolveMessage,
@@ -60,7 +64,7 @@ func NewAlertmanagerNotifier(model *NotificationChannelConfig, t *template.Templ
 
 // AlertmanagerNotifier sends alert notifications to the alert manager
 type AlertmanagerNotifier struct {
-	old_notifiers.NotifierBase
+	*Base
 
 	urls              []*url.URL
 	basicAuthUser     string
@@ -80,7 +84,10 @@ func (n *AlertmanagerNotifier) Notify(ctx context.Context, as ...*types.Alert) (
 		return false, err
 	}
 
-	errCnt := 0
+	var (
+		lastErr error
+		numErrs int
+	)
 	for _, u := range n.urls {
 		if _, err := sendHTTPRequest(ctx, u, httpCfg{
 			user:     n.basicAuthUser,
@@ -88,14 +95,15 @@ func (n *AlertmanagerNotifier) Notify(ctx context.Context, as ...*types.Alert) (
 			body:     body,
 		}, n.logger); err != nil {
 			n.logger.Warn("Failed to send to Alertmanager", "error", err, "alertmanager", n.Name, "url", u.String())
-			errCnt++
+			lastErr = err
+			numErrs++
 		}
 	}
 
-	if errCnt == len(n.urls) {
+	if numErrs == len(n.urls) {
 		// All attempts to send alerts have failed
 		n.logger.Warn("All attempts to send to Alertmanager failed", "alertmanager", n.Name)
-		return false, fmt.Errorf("failed to send alert to Alertmanager")
+		return false, fmt.Errorf("failed to send alert to Alertmanager: %w", lastErr)
 	}
 
 	return true, nil

@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
 
 // AzureMonitorQuery is the query for all the services as they have similar queries
@@ -17,6 +19,7 @@ type AzureMonitorQuery struct {
 	Params        url.Values
 	RefID         string
 	Alias         string
+	TimeRange     backend.TimeRange
 }
 
 // AzureMonitorResponse is the json response from the Azure Monitor API
@@ -150,6 +153,22 @@ type argJSONQuery struct {
 		Query        string `json:"query"`
 		ResultFormat string `json:"resultFormat"`
 	} `json:"azureResourceGraph"`
+}
+
+// metricChartDefinition is the JSON model for a metrics chart definition
+type metricChartDefinition struct {
+	ResourceMetadata    map[string]string   `json:"resourceMetadata"`
+	Name                string              `json:"name"`
+	AggregationType     int                 `json:"aggregationType"`
+	Namespace           string              `json:"namespace"`
+	MetricVisualization metricVisualization `json:"metricVisualization"`
+}
+
+// metricVisualization is the JSON model for the visualization field of a
+// metricChartDefinition
+type metricVisualization struct {
+	DisplayName         string `json:"displayName"`
+	ResourceDisplayName string `json:"resourceDisplayName"`
 }
 
 // InsightsDimensions will unmarshal from a JSON string, or an array of strings,

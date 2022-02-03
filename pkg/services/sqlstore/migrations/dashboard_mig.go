@@ -233,4 +233,9 @@ func addDashboardMigration(mg *Migrator) {
 		Type: IndexType,
 	}))
 	// LOGZ.IO GRAFANA CHANGE :: DEV-26550 - end
+
+	mg.AddMigration("Add index for dashboard_is_folder", NewAddIndexMigration(dashboardV2, &Index{
+		Cols: []string{"is_folder"},
+		Type: IndexType,
+	}))
 }

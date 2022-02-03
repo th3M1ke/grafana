@@ -66,6 +66,11 @@ export const PIPE_PARSERS: CompletionItem[] = [
     insertText: 'logfmt',
     documentation: 'Extracting labels from the log line using logfmt parser. Only available in Loki 2.0+.',
   },
+  {
+    label: 'pattern',
+    insertText: 'pattern',
+    documentation: 'Extracting labels from the log line using pattern parser. Only available in Loki 2.3+.',
+  },
 ];
 
 export const PIPE_OPERATORS: CompletionItem[] = [
@@ -163,6 +168,7 @@ export const RANGE_VEC_FUNCTIONS = [
 ];
 
 export const FUNCTIONS = [...AGGREGATION_OPERATORS, ...RANGE_VEC_FUNCTIONS];
+export const LOKI_KEYWORDS = [...FUNCTIONS, ...PIPE_OPERATORS, ...PIPE_PARSERS].map((keyword) => keyword.label);
 
 const tokenizer: Grammar = {
   comment: {

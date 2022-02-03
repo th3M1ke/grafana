@@ -1,7 +1,6 @@
 import { Alert, CodeEditor, Select } from '@grafana/ui';
 import React from 'react';
-import { AzureMonitorOption, AzureMonitorQuery, AzureResultFormat } from '../../types';
-import { findOption } from '../../utils/common';
+import { AzureMonitorOption, AzureMonitorQuery } from '../../types';
 import { Field } from '../Field';
 import { Space } from '../Space';
 
@@ -9,7 +8,7 @@ interface InsightsAnalyticsEditorProps {
   query: AzureMonitorQuery;
 }
 
-const FORMAT_OPTIONS: Array<AzureMonitorOption<AzureResultFormat>> = [
+const FORMAT_OPTIONS: Array<AzureMonitorOption<string>> = [
   { label: 'Time series', value: 'time_series' },
   { label: 'Table', value: 'table' },
 ];
@@ -19,7 +18,7 @@ const InsightsAnalyticsEditor: React.FC<InsightsAnalyticsEditorProps> = ({ query
     <div data-testid="azure-monitor-insights-analytics-query-editor">
       <CodeEditor
         language="kusto"
-        value={query.insightsAnalytics.query}
+        value={query.insightsAnalytics?.query ?? ''}
         height={200}
         width="100%"
         readOnly={true}
@@ -28,8 +27,9 @@ const InsightsAnalyticsEditor: React.FC<InsightsAnalyticsEditorProps> = ({ query
 
       <Field label="Format as">
         <Select
+          menuShouldPortal
           inputId="azure-monitor-logs-workspaces-field"
-          value={findOption(FORMAT_OPTIONS, query.insightsAnalytics.resultFormat)}
+          value={query.insightsAnalytics?.resultFormat}
           disabled={true}
           options={FORMAT_OPTIONS}
           onChange={() => {}}

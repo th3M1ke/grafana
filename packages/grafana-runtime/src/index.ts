@@ -7,16 +7,24 @@ export * from './services';
 export * from './config';
 export * from './types';
 export { loadPluginCss, SystemJS, PluginCssOptions } from './utils/plugin';
-export { reportMetaAnalytics } from './utils/analytics';
+export { reportMetaAnalytics, reportInteraction, reportPageview, reportExperimentView } from './utils/analytics';
+export { featureEnabled } from './utils/licensing';
 export { logInfo, logDebug, logWarning, logError } from './utils/logging';
-export { DataSourceWithBackend, HealthCheckResult, HealthStatus } from './utils/DataSourceWithBackend';
 export {
-  toDataQueryError,
+  DataSourceWithBackend,
+  HealthCheckResult,
+  HealthCheckResultDetails,
+  HealthStatus,
+  StreamOptionsProvider,
+} from './utils/DataSourceWithBackend';
+export {
   toDataQueryResponse,
   frameToMetricFindValue,
   BackendDataSourceResponse,
   DataResponse,
 } from './utils/queryResponse';
-export { PanelRenderer, PanelRendererProps, PanelRendererType, setPanelRenderer } from './components/PanelRenderer';
+export { PanelRenderer, PanelRendererProps } from './components/PanelRenderer';
+export { PanelDataErrorView, PanelDataErrorViewProps } from './components/PanelDataErrorView';
+export { toDataQueryError } from './utils/toDataQueryError';
 export { setQueryRunnerFactory, createQueryRunner, QueryRunnerFactory } from './services/QueryRunner';
 export { DataSourcePicker, DataSourcePickerProps, DataSourcePickerState } from './components/DataSourcePicker';

@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"regexp"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/client"
-	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cloudwatch"
 	"github.com/aws/aws-sdk-go/service/cloudwatch/cloudwatchiface"
@@ -24,10 +25,8 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
 	"github.com/grafana/grafana-plugin-sdk-go/data"
 	"github.com/grafana/grafana/pkg/components/simplejson"
+	"github.com/grafana/grafana/pkg/infra/httpclient"
 	"github.com/grafana/grafana/pkg/infra/log"
-	"github.com/grafana/grafana/pkg/plugins/backendplugin"
-	"github.com/grafana/grafana/pkg/plugins/backendplugin/coreplugin"
-	"github.com/grafana/grafana/pkg/registry"
 	"github.com/grafana/grafana/pkg/setting"
 )
 
@@ -44,6 +43,8 @@ type datasourceInfo struct {
 	secretKey string
 
 	datasourceID int64
+
+	HTTPClient *http.Client
 }
 
 const cloudWatchTSFormat = "2006-01-02 15:04:05.000"
@@ -56,49 +57,35 @@ const logStreamIdentifierInternal = "__logstream__grafana_internal__"
 var plog = log.New("tsdb.cloudwatch")
 var aliasFormat = regexp.MustCompile(`\{\{\s*(.+?)\s*\}\}`)
 
-func init() {
-	registry.Register(&registry.Descriptor{
-		Name:         "CloudWatchService",
-		InitPriority: registry.Low,
-		Instance:     &CloudWatchService{},
-	})
+func ProvideService(cfg *setting.Cfg, httpClientProvider httpclient.Provider) *CloudWatchService {
+	plog.Debug("initing")
+
+	executor := newExecutor(datasource.NewInstanceManager(NewInstanceSettings(httpClientProvider)), cfg, awsds.NewSessionCache())
+
+	return &CloudWatchService{
+		Cfg:      cfg,
+		Executor: executor,
+	}
 }
 
 type CloudWatchService struct {
-	LogsService          *LogsService          `inject:""`
-	BackendPluginManager backendplugin.Manager `inject:""`
-	Cfg                  *setting.Cfg          `inject:""`
-}
-
-func (s *CloudWatchService) Init() error {
-	plog.Debug("initing")
-
-	im := datasource.NewInstanceManager(NewInstanceSettings())
-
-	factory := coreplugin.New(backend.ServeOpts{
-		QueryDataHandler: newExecutor(s.LogsService, im, s.Cfg, awsds.NewSessionCache()),
-	})
-
-	if err := s.BackendPluginManager.RegisterAndStart(context.Background(), "cloudwatch", factory); err != nil {
-		plog.Error("Failed to register plugin", "error", err)
-	}
-	return nil
+	Cfg      *setting.Cfg
+	Executor *cloudWatchExecutor
 }
 
 type SessionCache interface {
-	GetSession(region string, s awsds.AWSDatasourceSettings) (*session.Session, error)
+	GetSession(c awsds.SessionConfig) (*session.Session, error)
 }
 
-func newExecutor(logsService *LogsService, im instancemgmt.InstanceManager, cfg *setting.Cfg, sessions SessionCache) *cloudWatchExecutor {
+func newExecutor(im instancemgmt.InstanceManager, cfg *setting.Cfg, sessions SessionCache) *cloudWatchExecutor {
 	return &cloudWatchExecutor{
-		logsService: logsService,
-		im:          im,
-		cfg:         cfg,
-		sessions:    sessions,
+		im:       im,
+		cfg:      cfg,
+		sessions: sessions,
 	}
 }
 
-func NewInstanceSettings() datasource.InstanceFactoryFunc {
+func NewInstanceSettings(httpClientProvider httpclient.Provider) datasource.InstanceFactoryFunc {
 	return func(settings backend.DataSourceInstanceSettings) (instancemgmt.Instance, error) {
 		jsonData := struct {
 			Profile       string `json:"profile"`
@@ -115,6 +102,11 @@ func NewInstanceSettings() datasource.InstanceFactoryFunc {
 			return nil, fmt.Errorf("error reading settings: %w", err)
 		}
 
+		httpClient, err := httpClientProvider.New()
+		if err != nil {
+			return nil, fmt.Errorf("error creating http client: %w", err)
+		}
+
 		model := datasourceInfo{
 			profile:       jsonData.Profile,
 			region:        jsonData.Region,
@@ -123,6 +115,7 @@ func NewInstanceSettings() datasource.InstanceFactoryFunc {
 			endpoint:      jsonData.Endpoint,
 			namespace:     jsonData.Namespace,
 			datasourceID:  settings.ID,
+			HTTPClient:    httpClient,
 		}
 
 		at := awsds.AuthTypeDefault
@@ -157,13 +150,9 @@ func NewInstanceSettings() datasource.InstanceFactoryFunc {
 
 // cloudWatchExecutor executes CloudWatch requests.
 type cloudWatchExecutor struct {
-	ec2Client  ec2iface.EC2API
-	rgtaClient resourcegroupstaggingapiiface.ResourceGroupsTaggingAPIAPI
-
-	logsService *LogsService
-	im          instancemgmt.InstanceManager
-	cfg         *setting.Cfg
-	sessions    SessionCache
+	im       instancemgmt.InstanceManager
+	cfg      *setting.Cfg
+	sessions SessionCache
 }
 
 func (e *cloudWatchExecutor) newSession(region string, pluginCtx backend.PluginContext) (*session.Session, error) {
@@ -176,16 +165,20 @@ func (e *cloudWatchExecutor) newSession(region string, pluginCtx backend.PluginC
 		region = dsInfo.region
 	}
 
-	return e.sessions.GetSession(region, awsds.AWSDatasourceSettings{
-		Profile:       dsInfo.profile,
-		Region:        region,
-		AuthType:      dsInfo.authType,
-		AssumeRoleARN: dsInfo.assumeRoleARN,
-		ExternalID:    dsInfo.externalID,
-		Endpoint:      dsInfo.endpoint,
-		DefaultRegion: dsInfo.region,
-		AccessKey:     dsInfo.accessKey,
-		SecretKey:     dsInfo.secretKey,
+	return e.sessions.GetSession(awsds.SessionConfig{
+		HTTPClient: dsInfo.HTTPClient,
+		Settings: awsds.AWSDatasourceSettings{
+			Profile:       dsInfo.profile,
+			Region:        region,
+			AuthType:      dsInfo.authType,
+			AssumeRoleARN: dsInfo.assumeRoleARN,
+			ExternalID:    dsInfo.externalID,
+			Endpoint:      dsInfo.endpoint,
+			DefaultRegion: dsInfo.region,
+			AccessKey:     dsInfo.accessKey,
+			SecretKey:     dsInfo.secretKey,
+		},
+		UserAgentName: aws.String("Cloudwatch"),
 	})
 }
 
@@ -209,32 +202,22 @@ func (e *cloudWatchExecutor) getCWLogsClient(region string, pluginCtx backend.Pl
 }
 
 func (e *cloudWatchExecutor) getEC2Client(region string, pluginCtx backend.PluginContext) (ec2iface.EC2API, error) {
-	if e.ec2Client != nil {
-		return e.ec2Client, nil
-	}
-
 	sess, err := e.newSession(region, pluginCtx)
 	if err != nil {
 		return nil, err
 	}
-	e.ec2Client = newEC2Client(sess)
 
-	return e.ec2Client, nil
+	return newEC2Client(sess), nil
 }
 
 func (e *cloudWatchExecutor) getRGTAClient(region string, pluginCtx backend.PluginContext) (resourcegroupstaggingapiiface.ResourceGroupsTaggingAPIAPI,
 	error) {
-	if e.rgtaClient != nil {
-		return e.rgtaClient, nil
-	}
-
 	sess, err := e.newSession(region, pluginCtx)
 	if err != nil {
 		return nil, err
 	}
-	e.rgtaClient = newRGTAClient(sess)
 
-	return e.rgtaClient, nil
+	return newRGTAClient(sess), nil
 }
 
 func (e *cloudWatchExecutor) alertQuery(ctx context.Context, logsClient cloudwatchlogsiface.CloudWatchLogsAPI,
@@ -304,8 +287,6 @@ func (e *cloudWatchExecutor) QueryData(ctx context.Context, req *backend.QueryDa
 		result, err = e.executeAnnotationQuery(ctx, model, q, req.PluginContext)
 	case "logAction":
 		result, err = e.executeLogActions(ctx, req)
-	case "liveLogAction":
-		result, err = e.executeLiveLogQuery(ctx, req)
 	case "timeSeriesQuery":
 		fallthrough
 	default:
@@ -397,24 +378,14 @@ func isTerminated(queryStatus string) bool {
 //
 // Stubbable by tests.
 var NewCWClient = func(sess *session.Session) cloudwatchiface.CloudWatchAPI {
-	client := cloudwatch.New(sess)
-	client.Handlers.Send.PushFront(func(r *request.Request) {
-		r.HTTPRequest.Header.Set("User-Agent", fmt.Sprintf("Grafana/%s", setting.BuildVersion))
-	})
-
-	return client
+	return cloudwatch.New(sess)
 }
 
 // NewCWLogsClient is a CloudWatch logs client factory.
 //
 // Stubbable by tests.
 var NewCWLogsClient = func(sess *session.Session) cloudwatchlogsiface.CloudWatchLogsAPI {
-	client := cloudwatchlogs.New(sess)
-	client.Handlers.Send.PushFront(func(r *request.Request) {
-		r.HTTPRequest.Header.Set("User-Agent", fmt.Sprintf("Grafana/%s", setting.BuildVersion))
-	})
-
-	return client
+	return cloudwatchlogs.New(sess)
 }
 
 // EC2 client factory.

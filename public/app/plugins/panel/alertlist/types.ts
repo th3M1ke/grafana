@@ -32,6 +32,15 @@ export interface AlertListOptions {
   folderId: number;
 }
 
+interface StateFilter {
+  firing: boolean;
+  pending: boolean;
+  inactive: boolean;
+  noData: boolean;
+  normal: boolean;
+  error: boolean;
+}
+
 export interface UnifiedAlertListOptions {
   maxItems: number;
   sortOrder: SortOrder;
@@ -39,7 +48,7 @@ export interface UnifiedAlertListOptions {
   alertName: string;
   showInstances: boolean;
   folder: { id: number; title: string };
-  stateFilter: {
-    [K in PromAlertingRuleState]: boolean;
-  };
+  stateFilter: StateFilter;
+  alertInstanceLabelFilter: string;
+  datasource: string;
 }

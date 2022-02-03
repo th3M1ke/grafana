@@ -15,6 +15,7 @@ export enum FieldType {
   boolean = 'boolean',
   // Used to detect that the value is some kind of trace data to help with the visualisation and processing.
   trace = 'trace',
+  geo = 'geo',
   other = 'other', // Object, Array, etc
 }
 
@@ -24,7 +25,7 @@ export enum FieldType {
  *
  * Plugins may extend this with additional properties. Something like series overrides
  */
-export interface FieldConfig<TOptions extends object = any> {
+export interface FieldConfig<TOptions = any> {
   /**
    * The display value for this field.  This supports template variables blank is auto
    */
@@ -120,11 +121,6 @@ export interface Field<T = any, V = Vector<T>> {
    * Cached values with appropriate display and id values
    */
   state?: FieldState | null;
-
-  /**
-   * Convert text to the field value
-   */
-  parse?: (value: any) => T;
 
   /**
    * Convert a value for display

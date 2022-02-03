@@ -14,6 +14,13 @@ import { seriesToRowsTransformerRegistryItem } from '../components/TransformersU
 import { concatenateTransformRegistryItem } from '../components/TransformersUI/ConcatenateTransformerEditor';
 import { renameByRegexTransformRegistryItem } from '../components/TransformersUI/RenameByRegexTransformer';
 import { histogramTransformRegistryItem } from '../components/TransformersUI/HistogramTransformerEditor';
+import { rowsToFieldsTransformRegistryItem } from '../components/TransformersUI/rowsToFields/RowsToFieldsTransformerEditor';
+import { configFromQueryTransformRegistryItem } from '../components/TransformersUI/configFromQuery/ConfigFromQueryTransformerEditor';
+import { prepareTimeseriesTransformerRegistryItem } from '../components/TransformersUI/prepareTimeSeries/PrepareTimeSeriesEditor';
+import { convertFieldTypeTransformRegistryItem } from '../components/TransformersUI/ConvertFieldTypeTransformerEditor';
+import { fieldLookupTransformRegistryItem } from '../components/TransformersUI/lookupGazetteer/FieldLookupTransformerEditor';
+import { extractFieldsTransformRegistryItem } from '../components/TransformersUI/extractFields/ExtractFieldsTransformerEditor';
+import { spatialTransformRegistryItem } from '../components/TransformersUI/spatial/SpatialTransformerEditor';
 
 export const getStandardTransformers = (): Array<TransformerRegistryItem<any>> => {
   return [
@@ -32,5 +39,12 @@ export const getStandardTransformers = (): Array<TransformerRegistryItem<any>> =
     sortByTransformRegistryItem,
     mergeTransformerRegistryItem,
     histogramTransformRegistryItem,
+    rowsToFieldsTransformRegistryItem,
+    configFromQueryTransformRegistryItem,
+    prepareTimeseriesTransformerRegistryItem,
+    convertFieldTypeTransformRegistryItem,
+    spatialTransformRegistryItem,
+    fieldLookupTransformRegistryItem,
+    extractFieldsTransformRegistryItem,
   ];
 };

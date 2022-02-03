@@ -1,54 +1,41 @@
 import React from 'react';
-import { hot } from 'react-hot-loader';
 import { css, cx } from '@emotion/css';
 import { compose } from 'redux';
-import { connect } from 'react-redux';
+import { connect, ConnectedProps } from 'react-redux';
 import AutoSizer from 'react-virtualized-auto-sizer';
 import memoizeOne from 'memoize-one';
 import { selectors } from '@grafana/e2e-selectors';
-import {
-  ErrorBoundaryAlert,
-  stylesFactory,
-  withTheme,
-  CustomScrollbar,
-  Collapse,
-  TooltipDisplayMode,
-} from '@grafana/ui';
-import {
-  AbsoluteTimeRange,
-  DataQuery,
-  DataSourceApi,
-  GrafanaTheme,
-  LoadingState,
-  PanelData,
-  RawTimeRange,
-  TimeZone,
-  LogsModel,
-  DataFrame,
-} from '@grafana/data';
+import { Collapse, CustomScrollbar, ErrorBoundaryAlert, Themeable2, withTheme2 } from '@grafana/ui';
+import { AbsoluteTimeRange, DataQuery, GrafanaTheme2, LoadingState, RawTimeRange } from '@grafana/data';
 
 import LogsContainer from './LogsContainer';
-import QueryRows from './QueryRows';
+import { QueryRows } from './QueryRows';
 import TableContainer from './TableContainer';
 import RichHistoryContainer from './RichHistory/RichHistoryContainer';
 import ExploreQueryInspector from './ExploreQueryInspector';
 import { splitOpen } from './state/main';
-import { changeSize } from './state/explorePane';
-import { updateTimeRange } from './state/time';
-import { scanStopAction, addQueryRow, modifyQueries, setQueries, scanStart } from './state/query';
-import { ExploreId, ExploreItemState } from 'app/types/explore';
+import { changeSize, changeGraphStyle } from './state/explorePane';
+import { makeAbsoluteTime, updateTimeRange } from './state/time';
+import { addQueryRow, loadLogsVolumeData, modifyQueries, scanStart, scanStopAction, setQueries } from './state/query';
+import { ExploreGraphStyle, ExploreId, ExploreItemState } from 'app/types/explore';
 import { StoreState } from 'app/types';
 import { ExploreToolbar } from './ExploreToolbar';
 import { NoDataSourceCallToAction } from './NoDataSourceCallToAction';
 import { getTimeZone } from '../profile/state/selectors';
 import { SecondaryActions } from './SecondaryActions';
 import { FILTER_FOR_OPERATOR, FILTER_OUT_OPERATOR, FilterItem } from '@grafana/ui/src/components/Table/types';
-import { ExploreGraphNGPanel } from './ExploreGraphNGPanel';
 import { NodeGraphContainer } from './NodeGraphContainer';
 import { ResponseErrorContainer } from './ResponseErrorContainer';
 import { TraceViewContainer } from './TraceView/TraceViewContainer';
+import { ExploreGraph } from './ExploreGraph';
+import { LogsVolumePanel } from './LogsVolumePanel';
+import { ExploreGraphLabel } from './ExploreGraphLabel';
+import appEvents from 'app/core/app_events';
+import { AbsoluteTimeEvent } from 'app/types/events';
+import { Unsubscribable } from 'rxjs';
+import { getNodeGraphDataFrames } from 'app/plugins/panel/nodeGraph/utils';
 
-const getStyles = stylesFactory((theme: GrafanaTheme) => {
+const getStyles = (theme: GrafanaTheme2) => {
   return {
     exploreMain: css`
       label: exploreMain;
@@ -65,42 +52,15 @@ const getStyles = stylesFactory((theme: GrafanaTheme) => {
       // Need to override normal css class and don't want to count on ordering of the classes in html.
       height: auto !important;
       flex: unset !important;
-      padding: ${theme.panelPadding}px;
+      display: unset !important;
+      padding: ${theme.spacing(1)};
     `,
   };
-});
+};
 
-export interface ExploreProps {
-  changeSize: typeof changeSize;
-  datasourceInstance: DataSourceApi | null;
-  datasourceMissing: boolean;
+export interface ExploreProps extends Themeable2 {
   exploreId: ExploreId;
-  modifyQueries: typeof modifyQueries;
-  scanning?: boolean;
-  scanRange?: RawTimeRange;
-  scanStart: typeof scanStart;
-  scanStopAction: typeof scanStopAction;
-  setQueries: typeof setQueries;
-  queryKeys: string[];
-  isLive: boolean;
-  syncedTimes: boolean;
-  updateTimeRange: typeof updateTimeRange;
-  graphResult: DataFrame[] | null;
-  logsResult?: LogsModel;
-  absoluteRange: AbsoluteTimeRange;
-  timeZone: TimeZone;
-  onHiddenSeriesChanged?: (hiddenSeries: string[]) => void;
-  queryResponse: PanelData;
-  originPanelId: number;
-  addQueryRow: typeof addQueryRow;
-  theme: GrafanaTheme;
-  loading: boolean;
-  showMetrics: boolean;
-  showTable: boolean;
-  showLogs: boolean;
-  showTrace: boolean;
-  showNodeGraph: boolean;
-  splitOpen: typeof splitOpen;
+  theme: GrafanaTheme2;
 }
 
 enum ExploreDrawer {
@@ -111,6 +71,8 @@ enum ExploreDrawer {
 interface ExploreState {
   openDrawer?: ExploreDrawer;
 }
+
+export type Props = ExploreProps & ConnectedProps<typeof connector>;
 
 /**
  * Explore provides an area for quick query iteration for a given datasource.
@@ -136,12 +98,23 @@ interface ExploreState {
  * The result viewers determine some of the query options sent to the datasource, e.g.,
  * `format`, to indicate eventual transformations by the datasources' result transformers.
  */
-export class Explore extends React.PureComponent<ExploreProps, ExploreState> {
-  constructor(props: ExploreProps) {
+export class Explore extends React.PureComponent<Props, ExploreState> {
+  scrollElement: HTMLDivElement | undefined;
+  absoluteTimeUnsubsciber: Unsubscribable | undefined;
+
+  constructor(props: Props) {
     super(props);
     this.state = {
       openDrawer: undefined,
     };
+  }
+
+  componentDidMount() {
+    this.absoluteTimeUnsubsciber = appEvents.subscribe(AbsoluteTimeEvent, this.onMakeAbsoluteTime);
+  }
+
+  componentWillUnmount() {
+    this.absoluteTimeUnsubsciber?.unsubscribe();
   }
 
   onChangeTime = (rawRange: RawTimeRange) => {
@@ -178,6 +151,11 @@ export class Explore extends React.PureComponent<ExploreProps, ExploreState> {
     this.props.addQueryRow(exploreId, queryKeys.length);
   };
 
+  onMakeAbsoluteTime = () => {
+    const { makeAbsoluteTime } = this.props;
+    makeAbsoluteTime();
+  };
+
   onModifyQueries = (action: any, index?: number) => {
     const { datasourceInstance } = this.props;
     if (datasourceInstance?.modifyQuery) {
@@ -205,6 +183,11 @@ export class Explore extends React.PureComponent<ExploreProps, ExploreState> {
     updateTimeRange({ exploreId, absoluteRange });
   };
 
+  onChangeGraphStyle = (graphStyle: ExploreGraphStyle) => {
+    const { exploreId, changeGraphStyle } = this.props;
+    changeGraphStyle(exploreId, graphStyle);
+  };
+
   toggleShowRichHistory = () => {
     this.setState((state) => {
       return {
@@ -229,42 +212,66 @@ export class Explore extends React.PureComponent<ExploreProps, ExploreState> {
     );
   }
 
-  renderGraphPanel() {
-    const { graphResult, absoluteRange, timeZone, splitOpen, queryResponse, loading } = this.props;
+  renderGraphPanel(width: number) {
+    const { graphResult, absoluteRange, timeZone, splitOpen, queryResponse, loading, theme, graphStyle } = this.props;
+    const spacing = parseInt(theme.spacing(2).slice(0, -2), 10);
+    const label = <ExploreGraphLabel graphStyle={graphStyle} onChangeGraphStyle={this.onChangeGraphStyle} />;
     return (
-      <Collapse label="Graph" loading={loading} isOpen>
-        <ExploreGraphNGPanel
+      <Collapse label={label} loading={loading} isOpen>
+        <ExploreGraph
+          graphStyle={graphStyle}
           data={graphResult!}
           height={400}
-          tooltipDisplayMode={TooltipDisplayMode.Single}
+          width={width - spacing}
           absoluteRange={absoluteRange}
+          onChangeTime={this.onUpdateTimeRange}
           timeZone={timeZone}
-          onUpdateTimeRange={this.onUpdateTimeRange}
           annotations={queryResponse.annotations}
           splitOpenFn={splitOpen}
+          loadingState={queryResponse.state}
         />
       </Collapse>
     );
   }
 
+  renderLogsVolume(width: number) {
+    const { logsVolumeData, exploreId, loadLogsVolumeData, absoluteRange, timeZone, splitOpen } = this.props;
+
+    return (
+      <LogsVolumePanel
+        absoluteRange={absoluteRange}
+        width={width}
+        logsVolumeData={logsVolumeData}
+        onUpdateTimeRange={this.onUpdateTimeRange}
+        timeZone={timeZone}
+        splitOpen={splitOpen}
+        onLoadLogsVolume={() => loadLogsVolumeData(exploreId)}
+      />
+    );
+  }
+
   renderTablePanel(width: number) {
-    const { exploreId, datasourceInstance } = this.props;
+    const { exploreId, datasourceInstance, timeZone } = this.props;
     return (
       <TableContainer
         ariaLabel={selectors.pages.Explore.General.table}
         width={width}
         exploreId={exploreId}
         onCellFilterAdded={datasourceInstance?.modifyQuery ? this.onCellFilterAdded : undefined}
+        timeZone={timeZone}
       />
     );
   }
 
-  renderLogsPanel() {
-    const { exploreId, syncedTimes } = this.props;
+  renderLogsPanel(width: number) {
+    const { exploreId, syncedTimes, theme, queryResponse } = this.props;
+    const spacing = parseInt(theme.spacing(2).slice(0, -2), 10);
     return (
       <LogsContainer
         exploreId={exploreId}
+        loadingState={queryResponse.state}
         syncedTimes={syncedTimes}
+        width={width - spacing}
         onClickFilterLabel={this.onClickFilterLabel}
         onClickFilterOutLabel={this.onClickFilterOutLabel}
         onStartScanning={this.onStartScanning}
@@ -277,20 +284,14 @@ export class Explore extends React.PureComponent<ExploreProps, ExploreState> {
     const { exploreId, showTrace, queryResponse } = this.props;
     return (
       <NodeGraphContainer
-        dataFrames={this.getNodeGraphDataFrames(queryResponse.series)}
+        dataFrames={this.memoizedGetNodeGraphDataFrames(queryResponse.series)}
         exploreId={exploreId}
         withTraceView={showTrace}
       />
     );
   }
 
-  getNodeGraphDataFrames = memoizeOne((frames: DataFrame[]) => {
-    // TODO: this not in sync with how other types of responses are handled. Other types have a query response
-    //  processing pipeline which ends up populating redux state with proper data. As we move towards more dataFrame
-    //  oriented API it seems like a better direction to move such processing into to visualisations and do minimal
-    //  and lazy processing here. Needs bigger refactor so keeping nodeGraph and Traces as they are for now.
-    return frames.filter((frame) => frame.meta?.preferredVisualisationType === 'nodeGraph');
-  });
+  memoizedGetNodeGraphDataFrames = memoizeOne(getNodeGraphDataFrames);
 
   renderTraceViewPanel() {
     const { queryResponse, splitOpen, exploreId } = this.props;
@@ -298,7 +299,14 @@ export class Explore extends React.PureComponent<ExploreProps, ExploreState> {
 
     return (
       // If there is no data (like 404) we show a separate error so no need to show anything here
-      dataFrames.length && <TraceViewContainer exploreId={exploreId} dataFrames={dataFrames} splitOpenFn={splitOpen} />
+      dataFrames.length && (
+        <TraceViewContainer
+          exploreId={exploreId}
+          dataFrames={dataFrames}
+          splitOpenFn={splitOpen}
+          scrollElement={this.scrollElement}
+        />
+      )
     );
   }
 
@@ -307,7 +315,6 @@ export class Explore extends React.PureComponent<ExploreProps, ExploreState> {
       datasourceInstance,
       datasourceMissing,
       exploreId,
-      queryKeys,
       graphResult,
       queryResponse,
       isLive,
@@ -317,6 +324,7 @@ export class Explore extends React.PureComponent<ExploreProps, ExploreState> {
       showLogs,
       showTrace,
       showNodeGraph,
+      timeZone,
     } = this.props;
     const { openDrawer } = this.state;
     const styles = getStyles(theme);
@@ -325,13 +333,16 @@ export class Explore extends React.PureComponent<ExploreProps, ExploreState> {
     const showQueryInspector = openDrawer === ExploreDrawer.QueryInspector;
 
     return (
-      <CustomScrollbar autoHeightMin={'100%'}>
+      <CustomScrollbar
+        autoHeightMin={'100%'}
+        scrollRefCallback={(scrollElement) => (this.scrollElement = scrollElement || undefined)}
+      >
         <ExploreToolbar exploreId={exploreId} onChangeTime={this.onChangeTime} />
         {datasourceMissing ? this.renderEmptyState() : null}
         {datasourceInstance && (
           <div className="explore-container">
             <div className={cx('panel-container', styles.queryContainer)}>
-              <QueryRows exploreId={exploreId} queryKeys={queryKeys} />
+              <QueryRows exploreId={exploreId} />
               <SecondaryActions
                 addQueryRowButtonDisabled={isLive}
                 // We cannot show multiple traces at the same time right now so we do not show add query button.
@@ -359,6 +370,7 @@ export class Explore extends React.PureComponent<ExploreProps, ExploreState> {
                           {showMetrics && graphResult && (
                             <ErrorBoundaryAlert>{this.renderGraphPanel()}</ErrorBoundaryAlert>
                           )}
+                          {<ErrorBoundaryAlert>{this.renderLogsVolume(width)}</ErrorBoundaryAlert>}
                           {showTable && <ErrorBoundaryAlert>{this.renderTablePanel(width)}</ErrorBoundaryAlert>}
                           {showLogs && <ErrorBoundaryAlert>{this.renderLogsPanel()}</ErrorBoundaryAlert>}
                           {showNodeGraph && <ErrorBoundaryAlert>{this.renderNodeGraphPanel()}</ErrorBoundaryAlert>}
@@ -377,6 +389,7 @@ export class Explore extends React.PureComponent<ExploreProps, ExploreState> {
                           exploreId={exploreId}
                           width={width}
                           onClose={this.toggleShowQueryInspector}
+                          timeZone={timeZone}
                         />
                       )}
                     </ErrorBoundaryAlert>
@@ -391,7 +404,7 @@ export class Explore extends React.PureComponent<ExploreProps, ExploreState> {
   }
 }
 
-function mapStateToProps(state: StoreState, { exploreId }: ExploreProps): Partial<ExploreProps> {
+function mapStateToProps(state: StoreState, { exploreId }: ExploreProps) {
   const explore = state.explore;
   const { syncedTimes } = explore;
   const item: ExploreItemState = explore[exploreId]!;
@@ -402,6 +415,7 @@ function mapStateToProps(state: StoreState, { exploreId }: ExploreProps): Partia
     queryKeys,
     isLive,
     graphResult,
+    logsVolumeData,
     logsResult,
     showLogs,
     showMetrics,
@@ -411,6 +425,7 @@ function mapStateToProps(state: StoreState, { exploreId }: ExploreProps): Partia
     queryResponse,
     showNodeGraph,
     loading,
+    graphStyle,
   } = item;
 
   return {
@@ -419,6 +434,7 @@ function mapStateToProps(state: StoreState, { exploreId }: ExploreProps): Partia
     queryKeys,
     isLive,
     graphResult,
+    logsVolumeData,
     logsResult: logsResult ?? undefined,
     absoluteRange,
     queryResponse,
@@ -430,22 +446,24 @@ function mapStateToProps(state: StoreState, { exploreId }: ExploreProps): Partia
     showTrace,
     showNodeGraph,
     loading,
+    graphStyle,
   };
 }
 
-const mapDispatchToProps: Partial<ExploreProps> = {
+const mapDispatchToProps = {
   changeSize,
+  changeGraphStyle,
   modifyQueries,
   scanStart,
   scanStopAction,
   setQueries,
   updateTimeRange,
+  makeAbsoluteTime,
+  loadLogsVolumeData,
   addQueryRow,
   splitOpen,
 };
 
-export default compose(
-  hot(module),
-  connect(mapStateToProps, mapDispatchToProps),
-  withTheme
-)(Explore) as React.ComponentType<{ exploreId: ExploreId }>;
+const connector = connect(mapStateToProps, mapDispatchToProps);
+
+export default compose(connector, withTheme2)(Explore) as React.ComponentType<{ exploreId: ExploreId }>;

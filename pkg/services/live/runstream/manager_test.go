@@ -27,11 +27,11 @@ func TestStreamManager_Run(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	defer mockCtrl.Finish()
 
-	mockChannelSender := NewMockChannelSender(mockCtrl)
-	mockPresenceGetter := NewMockPresenceGetter(mockCtrl)
+	mockChannelPublisher := NewMockChannelLocalPublisher(mockCtrl)
+	mockNumSubscribersGetter := NewMockNumLocalSubscribersGetter(mockCtrl)
 	mockContextGetter := NewMockPluginContextGetter(mockCtrl)
 
-	manager := NewManager(mockChannelSender, mockPresenceGetter, mockContextGetter)
+	manager := NewManager(mockChannelPublisher, mockNumSubscribersGetter, mockContextGetter)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -48,11 +48,11 @@ func TestStreamManager_SubmitStream_Send(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	defer mockCtrl.Finish()
 
-	mockPacketSender := NewMockChannelSender(mockCtrl)
-	mockPresenceGetter := NewMockPresenceGetter(mockCtrl)
+	mockPacketSender := NewMockChannelLocalPublisher(mockCtrl)
+	mockNumSubscribersGetter := NewMockNumLocalSubscribersGetter(mockCtrl)
 	mockContextGetter := NewMockPluginContextGetter(mockCtrl)
 
-	manager := NewManager(mockPacketSender, mockPresenceGetter, mockContextGetter)
+	manager := NewManager(mockPacketSender, mockNumSubscribersGetter, mockContextGetter)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -71,7 +71,7 @@ func TestStreamManager_SubmitStream_Send(t *testing.T) {
 		},
 	}
 
-	mockContextGetter.EXPECT().GetPluginContext(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(user *models.SignedInUser, pluginID string, datasourceUID string, skipCache bool) (backend.PluginContext, bool, error) {
+	mockContextGetter.EXPECT().GetPluginContext(context.Background(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, user *models.SignedInUser, pluginID string, datasourceUID string, skipCache bool) (backend.PluginContext, bool, error) {
 		require.Equal(t, int64(2), user.UserId)
 		require.Equal(t, int64(1), user.OrgId)
 		require.Equal(t, testPluginContext.PluginID, pluginID)
@@ -79,11 +79,11 @@ func TestStreamManager_SubmitStream_Send(t *testing.T) {
 		return testPluginContext, true, nil
 	}).Times(0)
 
-	mockPacketSender.EXPECT().Send("1/test", gomock.Any()).Times(1)
+	mockPacketSender.EXPECT().PublishLocal("1/test", gomock.Any()).Times(1)
 
 	mockStreamRunner := NewMockStreamRunner(mockCtrl)
 	mockStreamRunner.EXPECT().RunStream(
-		gomock.Any(), gomock.Any(), gomock.Any(),
+		gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
 	).DoAndReturn(func(ctx context.Context, req *backend.RunStreamRequest, sender *backend.StreamSender) error {
 		require.Equal(t, "test", req.Path)
 		close(startedCh)
@@ -94,12 +94,12 @@ func TestStreamManager_SubmitStream_Send(t *testing.T) {
 		return ctx.Err()
 	}).Times(1)
 
-	result, err := manager.SubmitStream(context.Background(), &models.SignedInUser{UserId: 2, OrgId: 1}, "1/test", "test", testPluginContext, mockStreamRunner, false)
+	result, err := manager.SubmitStream(context.Background(), &models.SignedInUser{UserId: 2, OrgId: 1}, "1/test", "test", nil, testPluginContext, mockStreamRunner, false)
 	require.NoError(t, err)
 	require.False(t, result.StreamExists)
 
 	// try submit the same.
-	result, err = manager.SubmitStream(context.Background(), &models.SignedInUser{UserId: 2, OrgId: 1}, "1/test", "test", backend.PluginContext{}, mockStreamRunner, false)
+	result, err = manager.SubmitStream(context.Background(), &models.SignedInUser{UserId: 2, OrgId: 1}, "1/test", "test", nil, backend.PluginContext{}, mockStreamRunner, false)
 	require.NoError(t, err)
 	require.True(t, result.StreamExists)
 
@@ -113,11 +113,11 @@ func TestStreamManager_SubmitStream_DifferentOrgID(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	defer mockCtrl.Finish()
 
-	mockPacketSender := NewMockChannelSender(mockCtrl)
-	mockPresenceGetter := NewMockPresenceGetter(mockCtrl)
+	mockPacketSender := NewMockChannelLocalPublisher(mockCtrl)
+	mockNumSubscribersGetter := NewMockNumLocalSubscribersGetter(mockCtrl)
 	mockContextGetter := NewMockPluginContextGetter(mockCtrl)
 
-	manager := NewManager(mockPacketSender, mockPresenceGetter, mockContextGetter)
+	manager := NewManager(mockPacketSender, mockNumSubscribersGetter, mockContextGetter)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -130,16 +130,16 @@ func TestStreamManager_SubmitStream_DifferentOrgID(t *testing.T) {
 	doneCh1 := make(chan struct{})
 	doneCh2 := make(chan struct{})
 
-	mockPacketSender.EXPECT().Send("1/test", gomock.Any()).Times(1)
-	mockPacketSender.EXPECT().Send("2/test", gomock.Any()).Times(1)
+	mockPacketSender.EXPECT().PublishLocal("1/test", gomock.Any()).Times(1)
+	mockPacketSender.EXPECT().PublishLocal("2/test", gomock.Any()).Times(1)
 
-	mockContextGetter.EXPECT().GetPluginContext(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(user *models.SignedInUser, pluginID string, datasourceUID string, skipCache bool) (backend.PluginContext, bool, error) {
+	mockContextGetter.EXPECT().GetPluginContext(context.Background(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, user *models.SignedInUser, pluginID string, datasourceUID string, skipCache bool) (backend.PluginContext, bool, error) {
 		return backend.PluginContext{}, true, nil
 	}).Times(0)
 
 	mockStreamRunner1 := NewMockStreamRunner(mockCtrl)
 	mockStreamRunner1.EXPECT().RunStream(
-		gomock.Any(), gomock.Any(), gomock.Any(),
+		gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
 	).DoAndReturn(func(ctx context.Context, req *backend.RunStreamRequest, sender *backend.StreamSender) error {
 		require.Equal(t, "test", req.Path)
 		close(startedCh1)
@@ -152,7 +152,7 @@ func TestStreamManager_SubmitStream_DifferentOrgID(t *testing.T) {
 
 	mockStreamRunner2 := NewMockStreamRunner(mockCtrl)
 	mockStreamRunner2.EXPECT().RunStream(
-		gomock.Any(), gomock.Any(), gomock.Any(),
+		gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
 	).DoAndReturn(func(ctx context.Context, req *backend.RunStreamRequest, sender *backend.StreamSender) error {
 		require.Equal(t, "test", req.Path)
 		close(startedCh2)
@@ -163,12 +163,12 @@ func TestStreamManager_SubmitStream_DifferentOrgID(t *testing.T) {
 		return ctx.Err()
 	}).Times(1)
 
-	result, err := manager.SubmitStream(context.Background(), &models.SignedInUser{UserId: 2, OrgId: 1}, "1/test", "test", backend.PluginContext{}, mockStreamRunner1, false)
+	result, err := manager.SubmitStream(context.Background(), &models.SignedInUser{UserId: 2, OrgId: 1}, "1/test", "test", nil, backend.PluginContext{}, mockStreamRunner1, false)
 	require.NoError(t, err)
 	require.False(t, result.StreamExists)
 
 	// try submit the same channel but different orgID.
-	result, err = manager.SubmitStream(context.Background(), &models.SignedInUser{UserId: 2, OrgId: 2}, "2/test", "test", backend.PluginContext{}, mockStreamRunner2, false)
+	result, err = manager.SubmitStream(context.Background(), &models.SignedInUser{UserId: 2, OrgId: 2}, "2/test", "test", nil, backend.PluginContext{}, mockStreamRunner2, false)
 	require.NoError(t, err)
 	require.False(t, result.StreamExists)
 
@@ -184,14 +184,14 @@ func TestStreamManager_SubmitStream_CloseNoSubscribers(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	defer mockCtrl.Finish()
 
-	mockPacketSender := NewMockChannelSender(mockCtrl)
-	mockPresenceGetter := NewMockPresenceGetter(mockCtrl)
+	mockPacketSender := NewMockChannelLocalPublisher(mockCtrl)
+	mockNumSubscribersGetter := NewMockNumLocalSubscribersGetter(mockCtrl)
 	mockContextGetter := NewMockPluginContextGetter(mockCtrl)
 
 	// Create manager with very fast num subscribers checks.
 	manager := NewManager(
 		mockPacketSender,
-		mockPresenceGetter,
+		mockNumSubscribersGetter,
 		mockContextGetter,
 		WithCheckConfig(10*time.Millisecond, 3),
 	)
@@ -205,21 +205,21 @@ func TestStreamManager_SubmitStream_CloseNoSubscribers(t *testing.T) {
 	startedCh := make(chan struct{})
 	doneCh := make(chan struct{})
 
-	mockContextGetter.EXPECT().GetPluginContext(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(user *models.SignedInUser, pluginID string, datasourceUID string, skipCache bool) (backend.PluginContext, bool, error) {
+	mockContextGetter.EXPECT().GetPluginContext(context.Background(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, user *models.SignedInUser, pluginID string, datasourceUID string, skipCache bool) (backend.PluginContext, bool, error) {
 		return backend.PluginContext{}, true, nil
 	}).Times(0)
 
-	mockPresenceGetter.EXPECT().GetNumSubscribers("1/test").Return(0, nil).Times(3)
+	mockNumSubscribersGetter.EXPECT().GetNumLocalSubscribers("1/test").Return(0, nil).Times(3)
 
 	mockStreamRunner := NewMockStreamRunner(mockCtrl)
-	mockStreamRunner.EXPECT().RunStream(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, req *backend.RunStreamRequest, sender *backend.StreamSender) error {
+	mockStreamRunner.EXPECT().RunStream(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, req *backend.RunStreamRequest, sender *backend.StreamSender) error {
 		close(startedCh)
 		<-ctx.Done()
 		close(doneCh)
 		return ctx.Err()
 	}).Times(1)
 
-	_, err := manager.SubmitStream(context.Background(), &models.SignedInUser{UserId: 2, OrgId: 1}, "1/test", "test", backend.PluginContext{}, mockStreamRunner, false)
+	_, err := manager.SubmitStream(context.Background(), &models.SignedInUser{UserId: 2, OrgId: 1}, "1/test", "test", nil, backend.PluginContext{}, mockStreamRunner, false)
 	require.NoError(t, err)
 
 	waitWithTimeout(t, startedCh, time.Second)
@@ -231,11 +231,11 @@ func TestStreamManager_SubmitStream_ErrorRestartsRunStream(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	defer mockCtrl.Finish()
 
-	mockPacketSender := NewMockChannelSender(mockCtrl)
-	mockPresenceGetter := NewMockPresenceGetter(mockCtrl)
+	mockPacketSender := NewMockChannelLocalPublisher(mockCtrl)
+	mockNumSubscribersGetter := NewMockNumLocalSubscribersGetter(mockCtrl)
 	mockContextGetter := NewMockPluginContextGetter(mockCtrl)
 
-	manager := NewManager(mockPacketSender, mockPresenceGetter, mockContextGetter)
+	manager := NewManager(mockPacketSender, mockNumSubscribersGetter, mockContextGetter)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -254,7 +254,7 @@ func TestStreamManager_SubmitStream_ErrorRestartsRunStream(t *testing.T) {
 		},
 	}
 
-	mockContextGetter.EXPECT().GetPluginContext(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(user *models.SignedInUser, pluginID string, datasourceUID string, skipCache bool) (backend.PluginContext, bool, error) {
+	mockContextGetter.EXPECT().GetPluginContext(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, user *models.SignedInUser, pluginID string, datasourceUID string, skipCache bool) (backend.PluginContext, bool, error) {
 		require.Equal(t, int64(2), user.UserId)
 		require.Equal(t, int64(1), user.OrgId)
 		require.Equal(t, testPluginContext.PluginID, pluginID)
@@ -264,7 +264,7 @@ func TestStreamManager_SubmitStream_ErrorRestartsRunStream(t *testing.T) {
 
 	mockStreamRunner := NewMockStreamRunner(mockCtrl)
 	mockStreamRunner.EXPECT().RunStream(
-		gomock.Any(), gomock.Any(), gomock.Any(),
+		gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
 	).DoAndReturn(func(ctx context.Context, req *backend.RunStreamRequest, sender *backend.StreamSender) error {
 		if currentErrors >= numErrors {
 			return nil
@@ -273,7 +273,7 @@ func TestStreamManager_SubmitStream_ErrorRestartsRunStream(t *testing.T) {
 		return errors.New("boom")
 	}).Times(numErrors + 1)
 
-	result, err := manager.SubmitStream(context.Background(), &models.SignedInUser{UserId: 2, OrgId: 1}, "test", "test", testPluginContext, mockStreamRunner, false)
+	result, err := manager.SubmitStream(context.Background(), &models.SignedInUser{UserId: 2, OrgId: 1}, "test", "test", nil, testPluginContext, mockStreamRunner, false)
 	require.NoError(t, err)
 	require.False(t, result.StreamExists)
 
@@ -284,11 +284,11 @@ func TestStreamManager_SubmitStream_NilErrorStopsRunStream(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	defer mockCtrl.Finish()
 
-	mockPacketSender := NewMockChannelSender(mockCtrl)
-	mockPresenceGetter := NewMockPresenceGetter(mockCtrl)
+	mockPacketSender := NewMockChannelLocalPublisher(mockCtrl)
+	mockNumSubscribersGetter := NewMockNumLocalSubscribersGetter(mockCtrl)
 	mockContextGetter := NewMockPluginContextGetter(mockCtrl)
 
-	manager := NewManager(mockPacketSender, mockPresenceGetter, mockContextGetter)
+	manager := NewManager(mockPacketSender, mockNumSubscribersGetter, mockContextGetter)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -296,18 +296,18 @@ func TestStreamManager_SubmitStream_NilErrorStopsRunStream(t *testing.T) {
 		_ = manager.Run(ctx)
 	}()
 
-	mockContextGetter.EXPECT().GetPluginContext(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(user *models.SignedInUser, pluginID string, datasourceUID string, skipCache bool) (backend.PluginContext, bool, error) {
+	mockContextGetter.EXPECT().GetPluginContext(context.Background(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, user *models.SignedInUser, pluginID string, datasourceUID string, skipCache bool) (backend.PluginContext, bool, error) {
 		return backend.PluginContext{}, true, nil
 	}).Times(0)
 
 	mockStreamRunner := NewMockStreamRunner(mockCtrl)
 	mockStreamRunner.EXPECT().RunStream(
-		gomock.Any(), gomock.Any(), gomock.Any(),
+		gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
 	).DoAndReturn(func(ctx context.Context, req *backend.RunStreamRequest, sender *backend.StreamSender) error {
 		return nil
 	}).Times(1)
 
-	result, err := manager.SubmitStream(context.Background(), &models.SignedInUser{UserId: 2, OrgId: 1}, "test", "test", backend.PluginContext{}, mockStreamRunner, false)
+	result, err := manager.SubmitStream(context.Background(), &models.SignedInUser{UserId: 2, OrgId: 1}, "test", "test", nil, backend.PluginContext{}, mockStreamRunner, false)
 	require.NoError(t, err)
 	require.False(t, result.StreamExists)
 	waitWithTimeout(t, result.CloseNotify, time.Second)
@@ -317,11 +317,11 @@ func TestStreamManager_HandleDatasourceUpdate(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	defer mockCtrl.Finish()
 
-	mockPacketSender := NewMockChannelSender(mockCtrl)
-	mockPresenceGetter := NewMockPresenceGetter(mockCtrl)
+	mockPacketSender := NewMockChannelLocalPublisher(mockCtrl)
+	mockNumSubscribersGetter := NewMockNumLocalSubscribersGetter(mockCtrl)
 	mockContextGetter := NewMockPluginContextGetter(mockCtrl)
 
-	manager := NewManager(mockPacketSender, mockPresenceGetter, mockContextGetter)
+	manager := NewManager(mockPacketSender, mockNumSubscribersGetter, mockContextGetter)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -337,7 +337,7 @@ func TestStreamManager_HandleDatasourceUpdate(t *testing.T) {
 		},
 	}
 
-	mockContextGetter.EXPECT().GetPluginContext(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(user *models.SignedInUser, pluginID string, datasourceUID string, skipCache bool) (backend.PluginContext, bool, error) {
+	mockContextGetter.EXPECT().GetPluginContext(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, user *models.SignedInUser, pluginID string, datasourceUID string, skipCache bool) (backend.PluginContext, bool, error) {
 		require.Equal(t, int64(2), user.UserId)
 		require.Equal(t, int64(1), user.OrgId)
 		require.Equal(t, testPluginContext.PluginID, pluginID)
@@ -352,7 +352,7 @@ func TestStreamManager_HandleDatasourceUpdate(t *testing.T) {
 
 	mockStreamRunner := NewMockStreamRunner(mockCtrl)
 	mockStreamRunner.EXPECT().RunStream(
-		gomock.Any(), gomock.Any(), gomock.Any(),
+		gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
 	).DoAndReturn(func(ctx context.Context, req *backend.RunStreamRequest, sender *backend.StreamSender) error {
 		if isFirstCall {
 			// first RunStream will wait till context done.
@@ -366,7 +366,7 @@ func TestStreamManager_HandleDatasourceUpdate(t *testing.T) {
 		return nil
 	}).Times(2)
 
-	result, err := manager.SubmitStream(context.Background(), &models.SignedInUser{UserId: 2, OrgId: 1}, "test", "test", testPluginContext, mockStreamRunner, false)
+	result, err := manager.SubmitStream(context.Background(), &models.SignedInUser{UserId: 2, OrgId: 1}, "test", "test", nil, testPluginContext, mockStreamRunner, false)
 	require.NoError(t, err)
 	require.False(t, result.StreamExists)
 
@@ -383,11 +383,11 @@ func TestStreamManager_HandleDatasourceDelete(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	defer mockCtrl.Finish()
 
-	mockPacketSender := NewMockChannelSender(mockCtrl)
-	mockPresenceGetter := NewMockPresenceGetter(mockCtrl)
+	mockPacketSender := NewMockChannelLocalPublisher(mockCtrl)
+	mockNumSubscribersGetter := NewMockNumLocalSubscribersGetter(mockCtrl)
 	mockContextGetter := NewMockPluginContextGetter(mockCtrl)
 
-	manager := NewManager(mockPacketSender, mockPresenceGetter, mockContextGetter)
+	manager := NewManager(mockPacketSender, mockNumSubscribersGetter, mockContextGetter)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -403,7 +403,7 @@ func TestStreamManager_HandleDatasourceDelete(t *testing.T) {
 		},
 	}
 
-	mockContextGetter.EXPECT().GetPluginContext(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(user *models.SignedInUser, pluginID string, datasourceUID string, skipCache bool) (backend.PluginContext, bool, error) {
+	mockContextGetter.EXPECT().GetPluginContext(context.Background(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, user *models.SignedInUser, pluginID string, datasourceUID string, skipCache bool) (backend.PluginContext, bool, error) {
 		require.Equal(t, int64(2), user.UserId)
 		require.Equal(t, int64(1), user.OrgId)
 		require.Equal(t, testPluginContext.PluginID, pluginID)
@@ -415,14 +415,14 @@ func TestStreamManager_HandleDatasourceDelete(t *testing.T) {
 
 	mockStreamRunner := NewMockStreamRunner(mockCtrl)
 	mockStreamRunner.EXPECT().RunStream(
-		gomock.Any(), gomock.Any(), gomock.Any(),
+		gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
 	).DoAndReturn(func(ctx context.Context, req *backend.RunStreamRequest, sender *backend.StreamSender) error {
 		close(doneCh)
 		<-ctx.Done()
 		return ctx.Err()
 	}).Times(1)
 
-	result, err := manager.SubmitStream(context.Background(), &models.SignedInUser{UserId: 2, OrgId: 1}, "test", "test", testPluginContext, mockStreamRunner, false)
+	result, err := manager.SubmitStream(context.Background(), &models.SignedInUser{UserId: 2, OrgId: 1}, "test", "test", nil, testPluginContext, mockStreamRunner, false)
 	require.NoError(t, err)
 	require.False(t, result.StreamExists)
 

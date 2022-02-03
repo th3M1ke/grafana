@@ -1,12 +1,16 @@
 package social
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/grafana/grafana/pkg/setting"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/oauth2"
 	"gopkg.in/square/go-jose.v2"
 	"gopkg.in/square/go-jose.v2/jwt"
@@ -14,8 +18,9 @@ import (
 
 func TestSocialAzureAD_UserInfo(t *testing.T) {
 	type fields struct {
-		SocialBase    *SocialBase
-		allowedGroups []string
+		SocialBase        *SocialBase
+		allowedGroups     []string
+		autoAssignOrgRole string
 	}
 	type args struct {
 		client *http.Client
@@ -39,7 +44,9 @@ func TestSocialAzureAD_UserInfo(t *testing.T) {
 				Name:              "My Name",
 				ID:                "1234",
 			},
-			settingAutoAssignOrgRole: "Viewer",
+			fields: fields{
+				autoAssignOrgRole: "Viewer",
+			},
 			want: &BasicUserInfo{
 				Id:      "1234",
 				Name:    "My Name",
@@ -77,7 +84,9 @@ func TestSocialAzureAD_UserInfo(t *testing.T) {
 				Name:              "My Name",
 				ID:                "1234",
 			},
-			settingAutoAssignOrgRole: "Viewer",
+			fields: fields{
+				autoAssignOrgRole: "Viewer",
+			},
 			want: &BasicUserInfo{
 				Id:      "1234",
 				Name:    "My Name",
@@ -154,7 +163,9 @@ func TestSocialAzureAD_UserInfo(t *testing.T) {
 				Name:              "My Name",
 				ID:                "1234",
 			},
-			settingAutoAssignOrgRole: "Editor",
+			fields: fields{
+				autoAssignOrgRole: "Editor",
+			},
 			want: &BasicUserInfo{
 				Id:      "1234",
 				Name:    "My Name",
@@ -222,7 +233,8 @@ func TestSocialAzureAD_UserInfo(t *testing.T) {
 		{
 			name: "Error if user is a member of allowed_groups",
 			fields: fields{
-				allowedGroups: []string{"foo", "bar"},
+				allowedGroups:     []string{"foo", "bar"},
+				autoAssignOrgRole: "Viewer",
 			},
 			claims: &azureClaims{
 				Email:             "me@example.com",
@@ -243,12 +255,38 @@ func TestSocialAzureAD_UserInfo(t *testing.T) {
 				Groups:  []string{"foo"},
 			},
 		},
+		{
+			name: "Fetch groups when ClaimsNames and ClaimsSources is set",
+			fields: fields{
+				SocialBase: newSocialBase("azuread", &oauth2.Config{}, &OAuthInfo{}),
+			},
+			claims: &azureClaims{
+				ID:                "1",
+				Name:              "test",
+				PreferredUsername: "test",
+				Email:             "test@test.com",
+				Roles:             []string{"Viewer"},
+				ClaimNames:        claimNames{Groups: "src1"},
+				ClaimSources:      nil, // set by the test
+			},
+			settingAutoAssignOrgRole: "",
+			want: &BasicUserInfo{
+				Id:     "1",
+				Name:   "test",
+				Email:  "test@test.com",
+				Login:  "test@test.com",
+				Role:   "Viewer",
+				Groups: []string{"from_server"},
+			},
+			wantErr: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &SocialAzureAD{
-				SocialBase:    tt.fields.SocialBase,
-				allowedGroups: tt.fields.allowedGroups,
+				SocialBase:        tt.fields.SocialBase,
+				allowedGroups:     tt.fields.allowedGroups,
+				autoAssignOrgRole: tt.fields.autoAssignOrgRole,
 			}
 
 			key := []byte("secret")
@@ -266,6 +304,25 @@ func TestSocialAzureAD_UserInfo(t *testing.T) {
 
 			var raw string
 			if tt.claims != nil {
+				if tt.claims.ClaimNames.Groups != "" {
+					server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+						tokenParts := strings.Split(request.Header.Get("Authorization"), " ")
+						require.Len(t, tokenParts, 2)
+						require.Equal(t, "fake_token", tokenParts[1])
+
+						writer.WriteHeader(http.StatusOK)
+
+						type response struct {
+							Value []string
+						}
+						res := response{Value: []string{"from_server"}}
+						require.NoError(t, json.NewEncoder(writer).Encode(&res))
+					}))
+					// need to set the fake servers url as endpoint to capture request
+					tt.claims.ClaimSources = map[string]claimSource{
+						tt.claims.ClaimNames.Groups: {Endpoint: server.URL},
+					}
+				}
 				raw, err = jwt.Signed(sig).Claims(cl).Claims(tt.claims).CompactSerialize()
 				if err != nil {
 					t.Error(err)
@@ -277,12 +334,16 @@ func TestSocialAzureAD_UserInfo(t *testing.T) {
 				}
 			}
 
-			token := &oauth2.Token{}
+			token := &oauth2.Token{
+				AccessToken: "fake_token",
+			}
 			if tt.claims != nil {
 				token = token.WithExtra(map[string]interface{}{"id_token": raw})
 			}
 
-			setting.AutoAssignOrgRole = tt.settingAutoAssignOrgRole
+			if tt.fields.SocialBase != nil {
+				tt.args.client = s.Client(context.Background(), token)
+			}
 
 			got, err := s.UserInfo(tt.args.client, token)
 			if (err != nil) != tt.wantErr {

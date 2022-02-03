@@ -17,8 +17,8 @@ func TestCSVFileScenario(t *testing.T) {
 	cfg.DataPath = t.TempDir()
 	cfg.StaticRootPath = "../../../public"
 
-	p := &testDataPlugin{
-		Cfg: cfg,
+	s := &Service{
+		cfg: cfg,
 	}
 
 	t.Run("loadCsvFile", func(t *testing.T) {
@@ -35,7 +35,7 @@ func TestCSVFileScenario(t *testing.T) {
 					_ = fileReader.Close()
 				}()
 
-				frame, err := p.loadCsvContent(fileReader, name)
+				frame, err := LoadCsvContent(fileReader, name)
 				require.NoError(t, err)
 				require.NotNil(t, frame)
 
@@ -50,7 +50,7 @@ func TestCSVFileScenario(t *testing.T) {
 		}
 
 		t.Run("Should not allow non file name chars", func(t *testing.T) {
-			_, err := p.loadCsvFile("../population_by_state.csv")
+			_, err := s.loadCsvFile("../population_by_state.csv")
 			require.Error(t, err)
 		})
 	})
@@ -77,7 +77,7 @@ func TestReadCSV(t *testing.T) {
 		"fields":[
 			{"type":"boolean","typeInfo":{"frame":"bool","nullable":true}},
 			{"type":"boolean","typeInfo":{"frame":"bool","nullable":true}},
-			{"type":"number","typeInfo":{"frame":"float64","nullable":true}},
+			{"type":"number","typeInfo":{"frame":"int64","nullable":true}},
 			{"type":"string","typeInfo":{"frame":"string","nullable":true}}
 		]},"data":{
 			"values":[

@@ -1,11 +1,14 @@
-import { isString, isArray, isEqual } from 'lodash';
-import { ScopedVars, UrlQueryMap, VariableType } from '@grafana/data';
+import { isArray, isEqual } from 'lodash';
+import { ScopedVars, UrlQueryMap, UrlQueryValue, VariableType } from '@grafana/data';
 import { getTemplateSrv } from '@grafana/runtime';
 
-import { ALL_VARIABLE_TEXT, ALL_VARIABLE_VALUE } from './state/types';
-import { QueryVariableModel, VariableModel, VariableRefresh } from './types';
+import { ALL_VARIABLE_TEXT, ALL_VARIABLE_VALUE } from './constants';
+import { QueryVariableModel, TransactionStatus, VariableModel, VariableRefresh } from './types';
 import { getTimeSrv } from '../dashboard/services/TimeSrv';
 import { variableAdapters } from './adapters';
+import { safeStringifyValue } from 'app/core/utils/explore';
+import { StoreState } from '../../types';
+import { getState } from '../../store/store';
 
 /*
  * This regex matches 3 types of variable reference with an optional format specifier
@@ -51,7 +54,7 @@ export const getSearchFilterScopedVar = (args: {
 
 export function containsVariable(...args: any[]) {
   const variableName = args[args.length - 1];
-  args[0] = isString(args[0]) ? args[0] : Object['values'](args[0]).join(' ');
+  args[0] = typeof args[0] === 'string' ? args[0] : safeStringifyValue(args[0]);
   const variableString = args.slice(0, -1).join(' ');
   const matches = variableString.match(variableRegex);
   const isMatchingVariable =
@@ -184,9 +187,16 @@ function getUrlValueForComparison(value: any): any {
   return value;
 }
 
-export function findTemplateVarChanges(query: UrlQueryMap, old: UrlQueryMap): UrlQueryMap | undefined {
+export interface UrlQueryType {
+  value: UrlQueryValue;
+  removed?: boolean;
+}
+
+export interface ExtendedUrlQueryMap extends Record<string, UrlQueryType> {}
+
+export function findTemplateVarChanges(query: UrlQueryMap, old: UrlQueryMap): ExtendedUrlQueryMap | undefined {
   let count = 0;
-  const changes: UrlQueryMap = {};
+  const changes: ExtendedUrlQueryMap = {};
 
   for (const key in query) {
     if (!key.startsWith('var-')) {
@@ -197,7 +207,7 @@ export function findTemplateVarChanges(query: UrlQueryMap, old: UrlQueryMap): Ur
     let newValue = getUrlValueForComparison(query[key]);
 
     if (!isEqual(newValue, oldValue)) {
-      changes[key] = query[key];
+      changes[key] = { value: query[key] };
       count++;
     }
   }
@@ -215,7 +225,7 @@ export function findTemplateVarChanges(query: UrlQueryMap, old: UrlQueryMap): Ur
     }
 
     if (!query.hasOwnProperty(key)) {
-      changes[key] = ''; // removed
+      changes[key] = { value: '', removed: true }; // removed
       count++;
     }
   }
@@ -244,4 +254,8 @@ export function ensureStringValues(value: any | any[]): string | string[] {
   }
 
   return '';
+}
+
+export function hasOngoingTransaction(state: StoreState = getState()): boolean {
+  return state.templating.transaction.status !== TransactionStatus.NotStarted;
 }

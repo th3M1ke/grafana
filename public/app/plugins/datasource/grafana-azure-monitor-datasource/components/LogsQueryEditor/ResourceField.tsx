@@ -8,6 +8,7 @@ import { Field } from '../Field';
 import ResourcePicker from '../ResourcePicker';
 import { parseResourceURI } from '../ResourcePicker/utils';
 import { Space } from '../Space';
+import { setResource } from './setQueryValue';
 
 function parseResourceDetails(resourceURI: string) {
   const parsed = parseResourceURI(resourceURI);
@@ -25,8 +26,7 @@ function parseResourceDetails(resourceURI: string) {
 
 const ResourceField: React.FC<AzureQueryEditorFieldProps> = ({ query, datasource, onQueryChange }) => {
   const styles = useStyles2(getStyles);
-  const { resource } = query.azureLogAnalytics;
-
+  const { resource } = query.azureLogAnalytics ?? {};
   const [pickerIsOpen, setPickerIsOpen] = useState(false);
 
   const handleOpenPicker = useCallback(() => {
@@ -39,13 +39,7 @@ const ResourceField: React.FC<AzureQueryEditorFieldProps> = ({ query, datasource
 
   const handleApply = useCallback(
     (resourceURI: string | undefined) => {
-      onQueryChange({
-        ...query,
-        azureLogAnalytics: {
-          ...query.azureLogAnalytics,
-          resource: resourceURI,
-        },
-      });
+      onQueryChange(setResource(query, resourceURI));
       closePicker();
     },
     [closePicker, onQueryChange, query]
@@ -55,10 +49,18 @@ const ResourceField: React.FC<AzureQueryEditorFieldProps> = ({ query, datasource
 
   return (
     <>
-      <Modal className={styles.modal} title="Select a resource" isOpen={pickerIsOpen} onDismiss={closePicker}>
+      <Modal
+        className={styles.modal}
+        title="Select a resource"
+        isOpen={pickerIsOpen}
+        onDismiss={closePicker}
+        // The growing number of rows added to the modal causes a focus
+        // error in the modal, making it impossible to click on new elements
+        trapFocus={false}
+      >
         <ResourcePicker
           resourcePickerData={datasource.resourcePickerData}
-          resourceURI={query.azureLogAnalytics.resource!}
+          resourceURI={resource}
           templateVariables={templateVariables}
           onApply={handleApply}
           onCancel={closePicker}
@@ -66,7 +68,7 @@ const ResourceField: React.FC<AzureQueryEditorFieldProps> = ({ query, datasource
       </Modal>
 
       <Field label="Resource">
-        <Button variant="secondary" onClick={handleOpenPicker}>
+        <Button variant="secondary" onClick={handleOpenPicker} type="button">
           <ResourceLabel resource={resource} datasource={datasource} />
         </Button>
       </Field>

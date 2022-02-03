@@ -9,40 +9,42 @@ import (
 	"github.com/prometheus/alertmanager/template"
 	"github.com/prometheus/alertmanager/types"
 
-	"github.com/grafana/grafana/pkg/bus"
 	"github.com/grafana/grafana/pkg/components/simplejson"
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/models"
-	"github.com/grafana/grafana/pkg/services/alerting"
-	old_notifiers "github.com/grafana/grafana/pkg/services/alerting/notifiers"
+	"github.com/grafana/grafana/pkg/services/notifications"
 	"github.com/grafana/grafana/pkg/setting"
 )
 
 type DiscordNotifier struct {
-	old_notifiers.NotifierBase
-	log        log.Logger
-	tmpl       *template.Template
-	Content    string
-	AvatarURL  string
-	WebhookURL string
+	*Base
+	log                log.Logger
+	ns                 notifications.WebhookSender
+	tmpl               *template.Template
+	Content            string
+	AvatarURL          string
+	WebhookURL         string
+	UseDiscordUsername bool
 }
 
-func NewDiscordNotifier(model *NotificationChannelConfig, t *template.Template) (*DiscordNotifier, error) {
+func NewDiscordNotifier(model *NotificationChannelConfig, ns notifications.WebhookSender, t *template.Template) (*DiscordNotifier, error) {
 	if model.Settings == nil {
-		return nil, alerting.ValidationError{Reason: "No Settings Supplied"}
+		return nil, receiverInitError{Cfg: *model, Reason: "no settings supplied"}
 	}
 
 	avatarURL := model.Settings.Get("avatar_url").MustString()
 
 	discordURL := model.Settings.Get("url").MustString()
 	if discordURL == "" {
-		return nil, alerting.ValidationError{Reason: "Could not find webhook url property in settings"}
+		return nil, receiverInitError{Reason: "could not find webhook url property in settings", Cfg: *model}
 	}
+
+	useDiscordUsername := model.Settings.Get("use_discord_username").MustBool(false)
 
 	content := model.Settings.Get("message").MustString(`{{ template "default.message" . }}`)
 
 	return &DiscordNotifier{
-		NotifierBase: old_notifiers.NewNotifierBase(&models.AlertNotification{
+		Base: NewBase(&models.AlertNotification{
 			Uid:                   model.UID,
 			Name:                  model.Name,
 			Type:                  model.Type,
@@ -50,11 +52,13 @@ func NewDiscordNotifier(model *NotificationChannelConfig, t *template.Template) 
 			Settings:              model.Settings,
 			SecureSettings:        model.SecureSettings,
 		}),
-		Content:    content,
-		AvatarURL:  avatarURL,
-		WebhookURL: discordURL,
-		log:        log.New("alerting.notifier.discord"),
-		tmpl:       t,
+		Content:            content,
+		AvatarURL:          avatarURL,
+		WebhookURL:         discordURL,
+		log:                log.New("alerting.notifier.discord"),
+		ns:                 ns,
+		tmpl:               t,
+		UseDiscordUsername: useDiscordUsername,
 	}, nil
 }
 
@@ -62,7 +66,10 @@ func (d DiscordNotifier) Notify(ctx context.Context, as ...*types.Alert) (bool, 
 	alerts := types.Alerts(as...)
 
 	bodyJSON := simplejson.New()
-	bodyJSON.Set("username", "Grafana")
+
+	if !d.UseDiscordUsername {
+		bodyJSON.Set("username", "Grafana")
+	}
 
 	var tmplErr error
 	tmpl, _ := TmplText(ctx, d.tmpl, as, d.log, &tmplErr)
@@ -81,7 +88,7 @@ func (d DiscordNotifier) Notify(ctx context.Context, as ...*types.Alert) (bool, 
 	}
 
 	embed := simplejson.New()
-	embed.Set("title", tmpl(`{{ template "default.title" . }}`))
+	embed.Set("title", tmpl(DefaultMessageTitleEmbed))
 	embed.Set("footer", footer)
 	embed.Set("type", "rich")
 
@@ -93,8 +100,9 @@ func (d DiscordNotifier) Notify(ctx context.Context, as ...*types.Alert) (bool, 
 
 	bodyJSON.Set("embeds", []interface{}{embed})
 
+	u := tmpl(d.WebhookURL)
 	if tmplErr != nil {
-		d.log.Debug("failed to template Discord message", "err", tmplErr.Error())
+		d.log.Warn("failed to template Discord message", "err", tmplErr.Error())
 	}
 
 	body, err := json.Marshal(bodyJSON)
@@ -102,13 +110,13 @@ func (d DiscordNotifier) Notify(ctx context.Context, as ...*types.Alert) (bool, 
 		return false, err
 	}
 	cmd := &models.SendWebhookSync{
-		Url:         d.WebhookURL,
+		Url:         u,
 		HttpMethod:  "POST",
 		ContentType: "application/json",
 		Body:        string(body),
 	}
 
-	if err := bus.DispatchCtx(ctx, cmd); err != nil {
+	if err := d.ns.SendWebhookSync(ctx, cmd); err != nil {
 		d.log.Error("Failed to send notification to Discord", "error", err)
 		return false, err
 	}

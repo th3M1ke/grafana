@@ -9,38 +9,47 @@ import (
 	apimodels "github.com/grafana/grafana/pkg/services/ngalert/api/tooling/definitions"
 )
 
-type ForkedAMSvc struct {
+type ForkedAlertmanagerApi struct {
 	AMSvc, GrafanaSvc AlertmanagerApiService
 	DatasourceCache   datasources.CacheService
 }
 
 // NewForkedAM implements a set of routes that proxy to various Alertmanager-compatible backends.
-func NewForkedAM(datasourceCache datasources.CacheService, proxy, grafana AlertmanagerApiService) *ForkedAMSvc {
-	return &ForkedAMSvc{
+func NewForkedAM(datasourceCache datasources.CacheService, proxy, grafana AlertmanagerApiService) *ForkedAlertmanagerApi {
+	return &ForkedAlertmanagerApi{
 		AMSvc:           proxy,
 		GrafanaSvc:      grafana,
 		DatasourceCache: datasourceCache,
 	}
 }
 
-func (am *ForkedAMSvc) getService(ctx *models.ReqContext) (AlertmanagerApiService, error) {
-	t, err := backendType(ctx, am.DatasourceCache)
+func (f *ForkedAlertmanagerApi) getService(ctx *models.ReqContext) (AlertmanagerApiService, error) {
+	t, err := backendType(ctx, f.DatasourceCache)
 	if err != nil {
 		return nil, err
 	}
 
 	switch t {
 	case apimodels.GrafanaBackend:
-		return am.GrafanaSvc, nil
+		return f.GrafanaSvc, nil
 	case apimodels.AlertmanagerBackend:
-		return am.AMSvc, nil
+		return f.AMSvc, nil
 	default:
 		return nil, fmt.Errorf("unexpected backend type (%v)", t)
 	}
 }
 
-func (am *ForkedAMSvc) RouteCreateSilence(ctx *models.ReqContext, body apimodels.PostableSilence) response.Response {
-	s, err := am.getService(ctx)
+func (f *ForkedAlertmanagerApi) forkRouteGetAMStatus(ctx *models.ReqContext) response.Response {
+	s, err := f.getService(ctx)
+	if err != nil {
+		return ErrResp(400, err, "")
+	}
+
+	return s.RouteGetAMStatus(ctx)
+}
+
+func (f *ForkedAlertmanagerApi) forkRouteCreateSilence(ctx *models.ReqContext, body apimodels.PostableSilence) response.Response {
+	s, err := f.getService(ctx)
 	if err != nil {
 		return ErrResp(400, err, "")
 	}
@@ -48,8 +57,8 @@ func (am *ForkedAMSvc) RouteCreateSilence(ctx *models.ReqContext, body apimodels
 	return s.RouteCreateSilence(ctx, body)
 }
 
-func (am *ForkedAMSvc) RouteDeleteAlertingConfig(ctx *models.ReqContext) response.Response {
-	s, err := am.getService(ctx)
+func (f *ForkedAlertmanagerApi) forkRouteDeleteAlertingConfig(ctx *models.ReqContext) response.Response {
+	s, err := f.getService(ctx)
 	if err != nil {
 		return ErrResp(400, err, "")
 	}
@@ -57,8 +66,8 @@ func (am *ForkedAMSvc) RouteDeleteAlertingConfig(ctx *models.ReqContext) respons
 	return s.RouteDeleteAlertingConfig(ctx)
 }
 
-func (am *ForkedAMSvc) RouteDeleteSilence(ctx *models.ReqContext) response.Response {
-	s, err := am.getService(ctx)
+func (f *ForkedAlertmanagerApi) forkRouteDeleteSilence(ctx *models.ReqContext) response.Response {
+	s, err := f.getService(ctx)
 	if err != nil {
 		return ErrResp(400, err, "")
 	}
@@ -66,8 +75,8 @@ func (am *ForkedAMSvc) RouteDeleteSilence(ctx *models.ReqContext) response.Respo
 	return s.RouteDeleteSilence(ctx)
 }
 
-func (am *ForkedAMSvc) RouteGetAlertingConfig(ctx *models.ReqContext) response.Response {
-	s, err := am.getService(ctx)
+func (f *ForkedAlertmanagerApi) forkRouteGetAlertingConfig(ctx *models.ReqContext) response.Response {
+	s, err := f.getService(ctx)
 	if err != nil {
 		return ErrResp(400, err, "")
 	}
@@ -75,8 +84,8 @@ func (am *ForkedAMSvc) RouteGetAlertingConfig(ctx *models.ReqContext) response.R
 	return s.RouteGetAlertingConfig(ctx)
 }
 
-func (am *ForkedAMSvc) RouteGetAMAlertGroups(ctx *models.ReqContext) response.Response {
-	s, err := am.getService(ctx)
+func (f *ForkedAlertmanagerApi) forkRouteGetAMAlertGroups(ctx *models.ReqContext) response.Response {
+	s, err := f.getService(ctx)
 	if err != nil {
 		return ErrResp(400, err, "")
 	}
@@ -84,8 +93,8 @@ func (am *ForkedAMSvc) RouteGetAMAlertGroups(ctx *models.ReqContext) response.Re
 	return s.RouteGetAMAlertGroups(ctx)
 }
 
-func (am *ForkedAMSvc) RouteGetAMAlerts(ctx *models.ReqContext) response.Response {
-	s, err := am.getService(ctx)
+func (f *ForkedAlertmanagerApi) forkRouteGetAMAlerts(ctx *models.ReqContext) response.Response {
+	s, err := f.getService(ctx)
 	if err != nil {
 		return ErrResp(400, err, "")
 	}
@@ -93,8 +102,8 @@ func (am *ForkedAMSvc) RouteGetAMAlerts(ctx *models.ReqContext) response.Respons
 	return s.RouteGetAMAlerts(ctx)
 }
 
-func (am *ForkedAMSvc) RouteGetSilence(ctx *models.ReqContext) response.Response {
-	s, err := am.getService(ctx)
+func (f *ForkedAlertmanagerApi) forkRouteGetSilence(ctx *models.ReqContext) response.Response {
+	s, err := f.getService(ctx)
 	if err != nil {
 		return ErrResp(400, err, "")
 	}
@@ -102,8 +111,8 @@ func (am *ForkedAMSvc) RouteGetSilence(ctx *models.ReqContext) response.Response
 	return s.RouteGetSilence(ctx)
 }
 
-func (am *ForkedAMSvc) RouteGetSilences(ctx *models.ReqContext) response.Response {
-	s, err := am.getService(ctx)
+func (f *ForkedAlertmanagerApi) forkRouteGetSilences(ctx *models.ReqContext) response.Response {
+	s, err := f.getService(ctx)
 	if err != nil {
 		return ErrResp(400, err, "")
 	}
@@ -111,13 +120,13 @@ func (am *ForkedAMSvc) RouteGetSilences(ctx *models.ReqContext) response.Respons
 	return s.RouteGetSilences(ctx)
 }
 
-func (am *ForkedAMSvc) RoutePostAlertingConfig(ctx *models.ReqContext, body apimodels.PostableUserConfig) response.Response {
-	s, err := am.getService(ctx)
+func (f *ForkedAlertmanagerApi) forkRoutePostAlertingConfig(ctx *models.ReqContext, body apimodels.PostableUserConfig) response.Response {
+	s, err := f.getService(ctx)
 	if err != nil {
 		return ErrResp(400, err, "")
 	}
 
-	b, err := backendType(ctx, am.DatasourceCache)
+	b, err := backendType(ctx, f.DatasourceCache)
 	if err != nil {
 		return ErrResp(400, err, "")
 	}
@@ -129,11 +138,20 @@ func (am *ForkedAMSvc) RoutePostAlertingConfig(ctx *models.ReqContext, body apim
 	return s.RoutePostAlertingConfig(ctx, body)
 }
 
-func (am *ForkedAMSvc) RoutePostAMAlerts(ctx *models.ReqContext, body apimodels.PostableAlerts) response.Response {
-	s, err := am.getService(ctx)
+func (f *ForkedAlertmanagerApi) forkRoutePostAMAlerts(ctx *models.ReqContext, body apimodels.PostableAlerts) response.Response {
+	s, err := f.getService(ctx)
 	if err != nil {
 		return ErrResp(400, err, "")
 	}
 
 	return s.RoutePostAMAlerts(ctx, body)
+}
+
+func (f *ForkedAlertmanagerApi) forkRoutePostTestReceivers(ctx *models.ReqContext, body apimodels.TestReceiversConfigBodyParams) response.Response {
+	s, err := f.getService(ctx)
+	if err != nil {
+		return ErrResp(400, err, "")
+	}
+
+	return s.RoutePostTestReceivers(ctx, body)
 }

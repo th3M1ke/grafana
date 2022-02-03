@@ -3,13 +3,13 @@ import React, { CSSProperties } from 'react';
 import tinycolor from 'tinycolor2';
 
 // Utils
-import { formattedValueToString, DisplayValue, FieldConfig } from '@grafana/data';
+import { formattedValueToString, DisplayValue, FieldConfig, FieldType } from '@grafana/data';
 import { calculateFontSize } from '../../utils/measureText';
 
 // Types
 import { BigValueColorMode, Props, BigValueJustifyMode, BigValueTextMode } from './BigValue';
 import { getTextColorForBackground } from '../../utils';
-import { DrawStyle, GraphFieldConfig } from '../uPlot/config';
+import { GraphDrawStyle, GraphFieldConfig } from '@grafana/schema';
 import { Sparkline } from '../Sparkline/Sparkline';
 
 const LINE_HEIGHT = 1.2;
@@ -155,7 +155,7 @@ export abstract class BigValueLayout {
   renderChart(): JSX.Element | null {
     const { sparkline, colorMode } = this.props;
 
-    if (!sparkline || !sparkline.y) {
+    if (!sparkline || sparkline.y?.type !== FieldType.number) {
       return null;
     }
 
@@ -178,7 +178,7 @@ export abstract class BigValueLayout {
     // The graph field configuration applied to Y values
     const config: FieldConfig<GraphFieldConfig> = {
       custom: {
-        drawStyle: DrawStyle.Line,
+        drawStyle: GraphDrawStyle.Line,
         lineWidth: 1,
         fillColor,
         lineColor,

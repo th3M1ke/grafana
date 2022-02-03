@@ -1,6 +1,10 @@
 package migrations
 
 import (
+	"os"
+
+	"github.com/grafana/grafana/pkg/services/featuremgmt"
+	"github.com/grafana/grafana/pkg/services/sqlstore/migrations/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/sqlstore/migrations/ualert"
 	. "github.com/grafana/grafana/pkg/services/sqlstore/migrator"
 )
@@ -10,7 +14,14 @@ import (
 // 2. Always add new migrations (to change or undo previous migrations)
 // 3. Some migrations are not yet written (rename column, table, drop table, index etc)
 
-func AddMigrations(mg *Migrator) {
+type OSSMigrations struct {
+}
+
+func ProvideOSSMigrations() *OSSMigrations {
+	return &OSSMigrations{}
+}
+
+func (*OSSMigrations) AddMigration(mg *Migrator) {
 	addMigrationLogMigrations(mg)
 	addUserMigrations(mg)
 	addTempUserMigrations(mg)
@@ -38,9 +49,25 @@ func AddMigrations(mg *Migrator) {
 	addUserAuthTokenMigrations(mg)
 	addCacheMigration(mg)
 	addShortURLMigrations(mg)
+	// TODO Delete when unified alerting is enabled by default unconditionally (Grafana v9)
+	if err := ualert.CheckUnifiedAlertingEnabledByDefault(mg); err != nil { // this should always go before any other ualert migration
+		mg.Logger.Error("failed to determine the status of alerting engine. Enable either legacy or unified alerting explicitly and try again", "err", err)
+		os.Exit(1)
+	}
 	ualert.AddTablesMigrations(mg)
 	ualert.AddDashAlertMigration(mg)
 	addLibraryElementsMigrations(mg)
+	if mg.Cfg != nil && mg.Cfg.IsFeatureToggleEnabled != nil {
+		if mg.Cfg.IsFeatureToggleEnabled(featuremgmt.FlagLiveConfig) {
+			addLiveChannelMigrations(mg)
+		}
+	}
+
+	ualert.RerunDashAlertMigration(mg)
+	addSecretsMigration(mg)
+	addKVStoreMigrations(mg)
+	ualert.AddDashboardUIDPanelIDMigration(mg)
+	accesscontrol.AddMigration(mg)
 }
 
 func addMigrationLogMigrations(mg *Migrator) {

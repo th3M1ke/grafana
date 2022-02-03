@@ -1,5 +1,6 @@
 import { map as _map } from 'lodash';
-import { map } from 'rxjs/operators';
+import { lastValueFrom, of } from 'rxjs';
+import { map, catchError } from 'rxjs/operators';
 import { BackendDataSourceResponse, DataSourceWithBackend, FetchResponse, getBackendSrv } from '@grafana/runtime';
 import { AnnotationEvent, DataSourceInstanceSettings, MetricFindValue, ScopedVars } from '@grafana/data';
 
@@ -10,6 +11,7 @@ import { getTimeSrv, TimeSrv } from 'app/features/dashboard/services/TimeSrv';
 //Types
 import { PostgresOptions, PostgresQuery, PostgresQueryForInterpolation } from './types';
 import { getSearchFilterScopedVar } from '../../../features/variables/utils';
+import { toTestingStatus } from '@grafana/runtime/src/utils/queryResponse';
 
 export class PostgresDatasource extends DataSourceWithBackend<PostgresQuery, PostgresOptions> {
   id: any;
@@ -62,7 +64,7 @@ export class PostgresDatasource extends DataSourceWithBackend<PostgresQuery, Pos
       expandedQueries = queries.map((query) => {
         const expandedQuery = {
           ...query,
-          datasource: this.name,
+          datasource: this.getRef(),
           rawSql: this.templateSrv.replace(query.rawSql, scopedVars, this.interpolateVariable),
           rawQuery: true,
         };
@@ -80,7 +82,7 @@ export class PostgresDatasource extends DataSourceWithBackend<PostgresQuery, Pos
     const queryModel = new PostgresQueryModel(target, this.templateSrv, scopedVars);
     return {
       refId: target.refId,
-      datasourceId: this.id,
+      datasource: this.getRef(),
       rawSql: queryModel.render(this.interpolateVariable as any),
       format: target.format,
     };
@@ -95,29 +97,30 @@ export class PostgresDatasource extends DataSourceWithBackend<PostgresQuery, Pos
 
     const query = {
       refId: options.annotation.name,
-      datasourceId: this.id,
+      datasource: this.getRef(),
       rawSql: this.templateSrv.replace(options.annotation.rawQuery, options.scopedVars, this.interpolateVariable),
       format: 'table',
     };
 
-    return getBackendSrv()
-      .fetch<BackendDataSourceResponse>({
-        url: '/api/ds/query',
-        method: 'POST',
-        data: {
-          from: options.range.from.valueOf().toString(),
-          to: options.range.to.valueOf().toString(),
-          queries: [query],
-        },
-        requestId: options.annotation.name,
-      })
-      .pipe(
-        map(
-          async (res: FetchResponse<BackendDataSourceResponse>) =>
-            await this.responseParser.transformAnnotationResponse(options, res.data)
+    return lastValueFrom(
+      getBackendSrv()
+        .fetch<BackendDataSourceResponse>({
+          url: '/api/ds/query',
+          method: 'POST',
+          data: {
+            from: options.range.from.valueOf().toString(),
+            to: options.range.to.valueOf().toString(),
+            queries: [query],
+          },
+          requestId: options.annotation.name,
+        })
+        .pipe(
+          map(
+            async (res: FetchResponse<BackendDataSourceResponse>) =>
+              await this.responseParser.transformAnnotationResponse(options, res.data)
+          )
         )
-      )
-      .toPromise();
+    );
   }
 
   metricFindQuery(query: string, optionalOptions: any): Promise<MetricFindValue[]> {
@@ -134,52 +137,72 @@ export class PostgresDatasource extends DataSourceWithBackend<PostgresQuery, Pos
 
     const interpolatedQuery = {
       refId: refId,
-      datasourceId: this.id,
+      datasource: this.getRef(),
       rawSql,
       format: 'table',
     };
 
     const range = this.timeSrv.timeRange();
 
-    return getBackendSrv()
-      .fetch<BackendDataSourceResponse>({
-        url: '/api/ds/query',
-        method: 'POST',
-        data: {
-          from: range.from.valueOf().toString(),
-          to: range.to.valueOf().toString(),
-          queries: [interpolatedQuery],
-        },
-        requestId: refId,
-      })
-      .pipe(
-        map((rsp) => {
-          return this.responseParser.transformMetricFindResponse(rsp);
+    return lastValueFrom(
+      getBackendSrv()
+        .fetch<BackendDataSourceResponse>({
+          url: '/api/ds/query',
+          method: 'POST',
+          data: {
+            from: range.from.valueOf().toString(),
+            to: range.to.valueOf().toString(),
+            queries: [interpolatedQuery],
+          },
+          requestId: refId,
         })
-      )
-      .toPromise();
+        .pipe(
+          map((rsp) => {
+            return this.responseParser.transformMetricFindResponse(rsp);
+          }),
+          catchError((err) => {
+            return of([]);
+          })
+        )
+    );
+  }
+
+  private _metaRequest(rawSql: string) {
+    const refId = 'meta';
+    const range = this.timeSrv.timeRange();
+    const query = {
+      refId: refId,
+      datasource: this.getRef(),
+      rawSql,
+      format: 'table',
+    };
+    return getBackendSrv().fetch<BackendDataSourceResponse>({
+      url: '/api/ds/query',
+      method: 'POST',
+      data: {
+        from: range.from.valueOf().toString(),
+        to: range.to.valueOf().toString(),
+        queries: [query],
+      },
+      requestId: refId,
+    });
   }
 
   getVersion(): Promise<any> {
-    return this.metricFindQuery("SELECT current_setting('server_version_num')::int/100", {});
+    return lastValueFrom(this._metaRequest("SELECT current_setting('server_version_num')::int/100"));
   }
 
   getTimescaleDBVersion(): Promise<any> {
-    return this.metricFindQuery("SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'", {});
+    return lastValueFrom(this._metaRequest("SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'"));
   }
 
   testDatasource(): Promise<any> {
-    return this.metricFindQuery('SELECT 1', {})
+    return lastValueFrom(this._metaRequest('SELECT 1'))
       .then(() => {
         return { status: 'success', message: 'Database Connection OK' };
       })
       .catch((err: any) => {
-        console.error(err);
-        if (err.data && err.data.message) {
-          return { status: 'error', message: err.data.message };
-        } else {
-          return { status: 'error', message: err.status };
-        }
+        return toTestingStatus(err);
       });
   }
 

@@ -1,9 +1,15 @@
 import React, { PureComponent } from 'react';
-import { hot } from 'react-hot-loader';
 import { connect, ConnectedProps } from 'react-redux';
-import { css } from 'emotion';
+import { css } from '@emotion/css';
 import { Collapse } from '@grafana/ui';
-import { AbsoluteTimeRange, Field, LogRowModel, RawTimeRange } from '@grafana/data';
+import {
+  AbsoluteTimeRange,
+  Field,
+  hasLogsContextSupport,
+  LoadingState,
+  LogRowModel,
+  RawTimeRange,
+} from '@grafana/data';
 import { ExploreId, ExploreItemState } from 'app/types/explore';
 import { StoreState } from 'app/types';
 import { splitOpen } from './state/main';
@@ -17,16 +23,18 @@ import { LiveTailControls } from './useLiveTailControls';
 import { getFieldLinksForExplore } from './utils/links';
 
 interface LogsContainerProps extends PropsFromRedux {
+  width: number;
   exploreId: ExploreId;
   scanRange?: RawTimeRange;
   syncedTimes: boolean;
+  loadingState: LoadingState;
   onClickFilterLabel?: (key: string, value: string) => void;
   onClickFilterOutLabel?: (key: string, value: string) => void;
   onStartScanning: () => void;
   onStopScanning: () => void;
 }
 
-export class LogsContainer extends PureComponent<LogsContainerProps> {
+class LogsContainer extends PureComponent<LogsContainerProps> {
   onChangeTime = (absoluteRange: AbsoluteTimeRange) => {
     const { exploreId, updateTimeRange } = this.props;
     updateTimeRange({ exploreId, absoluteRange });
@@ -35,7 +43,7 @@ export class LogsContainer extends PureComponent<LogsContainerProps> {
   getLogRowContext = async (row: LogRowModel, options?: any): Promise<any> => {
     const { datasourceInstance } = this.props;
 
-    if (datasourceInstance?.getLogRowContext) {
+    if (hasLogsContextSupport(datasourceInstance)) {
       return datasourceInstance.getLogRowContext(row, options);
     }
 
@@ -45,7 +53,7 @@ export class LogsContainer extends PureComponent<LogsContainerProps> {
   showContextToggle = (row?: LogRowModel): boolean => {
     const { datasourceInstance } = this.props;
 
-    if (datasourceInstance?.showContextToggle) {
+    if (hasLogsContextSupport(datasourceInstance)) {
       return datasourceInstance.showContextToggle(row);
     }
 
@@ -60,7 +68,7 @@ export class LogsContainer extends PureComponent<LogsContainerProps> {
   render() {
     const {
       loading,
-      logsHighlighterExpressions,
+      loadingState,
       logRows,
       logsMeta,
       logsSeries,
@@ -119,8 +127,9 @@ export class LogsContainer extends PureComponent<LogsContainerProps> {
               logsMeta={logsMeta}
               logsSeries={logsSeries}
               logsQueries={logsQueries}
-              highlighterExpressions={logsHighlighterExpressions}
+              width={width}
               loading={loading}
+              loadingState={loadingState}
               onChangeTime={this.onChangeTime}
               onClickFilterLabel={onClickFilterLabel}
               onClickFilterOutLabel={onClickFilterOutLabel}
@@ -149,7 +158,6 @@ function mapStateToProps(state: StoreState, { exploreId }: { exploreId: string }
   // @ts-ignore
   const item: ExploreItemState = explore[exploreId];
   const {
-    logsHighlighterExpressions,
     logsResult,
     loading,
     scanning,
@@ -158,12 +166,13 @@ function mapStateToProps(state: StoreState, { exploreId }: { exploreId: string }
     isPaused,
     range,
     absoluteRange,
+    logsVolumeDataProvider,
+    logsVolumeData,
   } = item;
   const timeZone = getTimeZone(state.user);
 
   return {
     loading,
-    logsHighlighterExpressions,
     logRows: logsResult?.rows,
     logsMeta: logsResult?.meta,
     logsSeries: logsResult?.series,
@@ -176,6 +185,8 @@ function mapStateToProps(state: StoreState, { exploreId }: { exploreId: string }
     isPaused,
     range,
     absoluteRange,
+    logsVolumeDataProvider,
+    logsVolumeData,
   };
 }
 
@@ -189,4 +200,4 @@ const mapDispatchToProps = {
 const connector = connect(mapStateToProps, mapDispatchToProps);
 type PropsFromRedux = ConnectedProps<typeof connector>;
 
-export default hot(module)(connector(LogsContainer));
+export default connector(LogsContainer);

@@ -1,6 +1,8 @@
 package load
 
 import (
+	"path/filepath"
+
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/load"
 	"github.com/grafana/grafana/pkg/schema"
@@ -10,10 +12,11 @@ import (
 // definitions on which all Grafana scuemata rely.
 //
 // TODO probably cache this or something
-func getBaseScuemata(p BaseLoadPaths) (*cue.Instance, error) {
+func getBaseScuemata(p BaseLoadPaths) (cue.Value, error) {
 	overlay := make(map[string]load.Source)
-	if err := toOverlay("/grafana", p.BaseCueFS, overlay); err != nil {
-		return nil, err
+
+	if err := toOverlay(filepath.Join(prefix, "grafana"), p.BaseCueFS, overlay); err != nil {
+		return cue.Value{}, err
 	}
 
 	cfg := &load.Config{
@@ -32,9 +35,14 @@ func getBaseScuemata(p BaseLoadPaths) (*cue.Instance, error) {
 		// And no, changing the toOverlay() to have a subpath and the
 		// load.Instances to mirror that subpath does not allow us to get rid of
 		// this "/".
-		Dir: "/",
+		Dir: prefix,
 	}
-	return rt.Build(load.Instances([]string{"/grafana/cue/scuemata"}, cfg)[0])
+
+	res := ctx.BuildInstance(load.Instances([]string{
+		filepath.Join(prefix, "grafana", "cue", "scuemata", "scuemata.cue"),
+		filepath.Join(prefix, "grafana", "cue", "scuemata", "panel-plugin.cue"),
+	}, cfg)[0])
+	return res, res.Err()
 }
 
 func buildGenericScuemata(famval cue.Value) (schema.VersionedCueSchema, error) {
@@ -96,11 +104,15 @@ type genericVersionedSchema struct {
 
 // Validate checks that the resource is correct with respect to the schema.
 func (gvs *genericVersionedSchema) Validate(r schema.Resource) error {
-	rv, err := rt.Compile("resource", r.Value)
-	if err != nil {
-		return err
+	name := r.Name
+	if name == "" {
+		name = "resource"
 	}
-	return gvs.actual.Unify(rv.Value()).Validate(cue.Concrete(true))
+	rv := ctx.CompileString(r.Value.(string), cue.Filename(name))
+	if rv.Err() != nil {
+		return rv.Err()
+	}
+	return gvs.actual.Unify(rv).Validate(cue.Concrete(true))
 }
 
 // CUE returns the cue.Value representing the actual schema.

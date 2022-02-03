@@ -2,7 +2,7 @@ import Plain from 'slate-plain-serializer';
 import { Editor as SlateEditor } from 'slate';
 import LanguageProvider from './language_provider';
 import { PrometheusDatasource } from './datasource';
-import { HistoryItem } from '@grafana/data';
+import { AbstractLabelOperator, HistoryItem } from '@grafana/data';
 import { PromQuery } from './types';
 import Mock = jest.Mock;
 import { SearchFunctionType } from '@grafana/ui';
@@ -61,6 +61,21 @@ describe('Language completion provider', () => {
 
     it('removes range syntax', () => {
       expect(cleanText('[1m')).toBe('1m');
+    });
+  });
+
+  describe('fetchSeries', () => {
+    it('should use match[] parameter', () => {
+      const languageProvider = new LanguageProvider(datasource);
+      const fetchSeries = languageProvider.fetchSeries;
+      const requestSpy = jest.spyOn(languageProvider, 'request');
+      fetchSeries('{job="grafana"}');
+      expect(requestSpy).toHaveBeenCalled();
+      expect(requestSpy).toHaveBeenCalledWith(
+        '/api/v1/series',
+        {},
+        { end: '1', 'match[]': '{job="grafana"}', start: '0' }
+      );
     });
   });
 
@@ -124,8 +139,9 @@ describe('Language completion provider', () => {
       expect(result.suggestions).toMatchObject([
         {
           items: [
-            { label: '$__interval', sortValue: '$__interval' }, // TODO: figure out why this row and sortValue is needed
+            { label: '$__interval', sortValue: '$__interval' },
             { label: '$__rate_interval', sortValue: '$__rate_interval' },
+            { label: '$__range', sortValue: '$__range' },
             { label: '1m', sortValue: '00:01:00' },
             { label: '5m', sortValue: '00:05:00' },
             { label: '10m', sortValue: '00:10:00' },
@@ -576,6 +592,36 @@ describe('Language completion provider', () => {
       expect((datasource.metadataRequest as Mock).mock.calls.length).toBe(0);
       await instance.start();
       expect((datasource.metadataRequest as Mock).mock.calls.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Query imports', () => {
+    it('returns empty queries', async () => {
+      const instance = new LanguageProvider(datasource);
+      const result = await instance.importFromAbstractQuery({ refId: 'bar', labelMatchers: [] });
+      expect(result).toEqual({ refId: 'bar', expr: '', range: true });
+    });
+
+    describe('exporting to abstract query', () => {
+      it('exports labels with metric name', async () => {
+        const instance = new LanguageProvider(datasource);
+        const abstractQuery = instance.exportToAbstractQuery({
+          refId: 'bar',
+          expr: 'metric_name{label1="value1", label2!="value2", label3=~"value3", label4!~"value4"}',
+          instant: true,
+          range: false,
+        });
+        expect(abstractQuery).toMatchObject({
+          refId: 'bar',
+          labelMatchers: [
+            { name: 'label1', operator: AbstractLabelOperator.Equal, value: 'value1' },
+            { name: 'label2', operator: AbstractLabelOperator.NotEqual, value: 'value2' },
+            { name: 'label3', operator: AbstractLabelOperator.EqualRegEx, value: 'value3' },
+            { name: 'label4', operator: AbstractLabelOperator.NotEqualRegEx, value: 'value4' },
+            { name: '__name__', operator: AbstractLabelOperator.Equal, value: 'metric_name' },
+          ],
+        });
+      });
     });
   });
 });

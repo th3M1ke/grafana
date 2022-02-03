@@ -1,18 +1,27 @@
 import { once, chain, difference } from 'lodash';
 import LRU from 'lru-cache';
 import { Value } from 'slate';
+import Prism from 'prismjs';
 
-import { dateTime, HistoryItem, LanguageProvider } from '@grafana/data';
+import {
+  AbstractLabelMatcher,
+  AbstractLabelOperator,
+  AbstractQuery,
+  dateTime,
+  HistoryItem,
+  LanguageProvider,
+} from '@grafana/data';
 import { CompletionItem, CompletionItemGroup, SearchFunctionType, TypeaheadInput, TypeaheadOutput } from '@grafana/ui';
 
 import {
   addLimitInfo,
+  extractLabelMatchers,
   // fixSummariesMetadata, // LOGZ.IO GRAFANA CHANGE :: DEV-24838: Remove fixSummariesMetadata
-  limitSuggestions,
   parseSelector,
-  processHistogramLabels,
+  processHistogramMetrics,
   processLabels,
   roundSecToMin,
+  toPromLikeQuery,
 } from './language_utils';
 import PromqlSyntax, { FUNCTIONS, RATE_RANGES } from './promql';
 
@@ -54,7 +63,7 @@ export function addHistoryMetadata(item: CompletionItem, history: any[]): Comple
 function addMetricsMetadata(metric: string, metadata?: PromMetricsMetadata): CompletionItem {
   const item: CompletionItem = { label: metric };
   if (metadata && metadata[metric]) {
-    const { type, help } = metadata[metric][0];
+    const { type, help } = metadata[metric];
     item.documentation = `${type.toUpperCase()}: ${help}`;
   }
   return item;
@@ -62,15 +71,18 @@ function addMetricsMetadata(metric: string, metadata?: PromMetricsMetadata): Com
 
 const PREFIX_DELIMITER_REGEX = /(="|!="|=~"|!~"|\{|\[|\(|\+|-|\/|\*|%|\^|\band\b|\bor\b|\bunless\b|==|>=|!=|<=|>|<|=|~|,)/;
 
+interface AutocompleteContext {
+  history?: Array<HistoryItem<PromQuery>>;
+}
 export default class PromQlLanguageProvider extends LanguageProvider {
   histogramMetrics: string[];
   timeRange?: { start: number; end: number };
   metrics: string[];
   metricsMetadata?: PromMetricsMetadata;
-  startTask: Promise<any>;
+  declare startTask: Promise<any>;
   datasource: PrometheusDatasource;
-  labelKeys: string[];
-  labelFetchTs: number;
+  labelKeys: string[] = [];
+  declare labelFetchTs: number;
 
   /**
    *  Cache for labels of series. This is bit simplistic in the sense that it just counts responses each as a 1 and does
@@ -120,12 +132,8 @@ export default class PromQlLanguageProvider extends LanguageProvider {
     // TODO #33976: make those requests parallel
     await this.fetchLabels();
     this.metrics = (await this.fetchLabelValues('__name__')) || [];
-    // LOGZ.IO GRAFANA CHANGE :: DEV-24838: Mock metadata requests
-    // this.metricsMetadata = fixSummariesMetadata(await this.request('/api/v1/metadata', {}));
-    this.metricsMetadata = {};
-    // LOGZ.IO GRAFANA CHANGE :: end
-    this.processHistogramMetrics(this.metrics);
-
+    this.metricsMetadata = {}; // LOGZ.IO GRAFANA CHANGE :: DEV-24838: Mock metadata requests
+    this.histogramMetrics = processHistogramMetrics(this.metrics).sort();
     return [];
   };
 
@@ -133,17 +141,9 @@ export default class PromQlLanguageProvider extends LanguageProvider {
     return this.labelKeys;
   }
 
-  processHistogramMetrics = (data: string[]) => {
-    const { values } = processHistogramLabels(data);
-
-    if (values && values['__name__']) {
-      this.histogramMetrics = values['__name__'].slice().sort();
-    }
-  };
-
   provideCompletionItems = async (
     { prefix, text, value, labelKey, wrapperClasses }: TypeaheadInput,
-    context: { history: Array<HistoryItem<PromQuery>> } = { history: [] }
+    context: AutocompleteContext = {}
   ): Promise<TypeaheadOutput> => {
     const emptyResult: TypeaheadOutput = { suggestions: [] };
 
@@ -197,13 +197,13 @@ export default class PromQlLanguageProvider extends LanguageProvider {
     return emptyResult;
   };
 
-  getBeginningCompletionItems = (context: { history: Array<HistoryItem<PromQuery>> }): TypeaheadOutput => {
+  getBeginningCompletionItems = (context: AutocompleteContext): TypeaheadOutput => {
     return {
       suggestions: [...this.getEmptyCompletionItems(context).suggestions, ...this.getTermCompletionItems().suggestions],
     };
   };
 
-  getEmptyCompletionItems = (context: { history: Array<HistoryItem<PromQuery>> }): TypeaheadOutput => {
+  getEmptyCompletionItems = (context: AutocompleteContext): TypeaheadOutput => {
     const { history } = context;
     const suggestions: CompletionItemGroup[] = [];
 
@@ -239,10 +239,9 @@ export default class PromQlLanguageProvider extends LanguageProvider {
     });
 
     if (metrics && metrics.length) {
-      const limitInfo = addLimitInfo(metrics);
       suggestions.push({
-        label: `Metrics${limitInfo}`,
-        items: limitSuggestions(metrics).map((m) => addMetricsMetadata(m, metricsMetadata)),
+        label: 'Metrics',
+        items: metrics.map((m) => addMetricsMetadata(m, metricsMetadata)),
         searchFunctionType: SearchFunctionType.Fuzzy,
       });
     }
@@ -267,7 +266,10 @@ export default class PromQlLanguageProvider extends LanguageProvider {
 
     // Stitch all query lines together to support multi-line queries
     let queryOffset;
-    const queryText = value.document.getBlocks().reduce((text: string, block) => {
+    const queryText = value.document.getBlocks().reduce((text, block) => {
+      if (text === undefined) {
+        return '';
+      }
       if (!block) {
         return text;
       }
@@ -412,6 +414,32 @@ export default class PromQlLanguageProvider extends LanguageProvider {
     return { context, suggestions };
   };
 
+  importFromAbstractQuery(labelBasedQuery: AbstractQuery): PromQuery {
+    return toPromLikeQuery(labelBasedQuery);
+  }
+
+  exportToAbstractQuery(query: PromQuery): AbstractQuery {
+    const promQuery = query.expr;
+    if (!promQuery || promQuery.length === 0) {
+      return { refId: query.refId, labelMatchers: [] };
+    }
+    const tokens = Prism.tokenize(promQuery, PromqlSyntax);
+    const labelMatchers: AbstractLabelMatcher[] = extractLabelMatchers(tokens);
+    const nameLabelValue = getNameLabelValue(promQuery, tokens);
+    if (nameLabelValue && nameLabelValue.length > 0) {
+      labelMatchers.push({
+        name: '__name__',
+        operator: AbstractLabelOperator.Equal,
+        value: nameLabelValue,
+      });
+    }
+
+    return {
+      refId: query.refId,
+      labelMatchers,
+    };
+  }
+
   async getSeries(selector: string, withName?: boolean): Promise<Record<string, string[]>> {
     if (this.datasource.lookupsDisabled) {
       return {};
@@ -497,7 +525,7 @@ export default class PromQlLanguageProvider extends LanguageProvider {
   fetchSeries = async (match: string): Promise<Array<Record<string, string>>> => {
     const url = '/api/v1/series';
     const range = this.datasource.getTimeRangeParams();
-    const params = { ...range, match };
+    const params = { ...range, 'match[]': match };
     return await this.request(url, {}, params);
   };
 
@@ -510,4 +538,15 @@ export default class PromQlLanguageProvider extends LanguageProvider {
     const values = await Promise.all(DEFAULT_KEYS.map((key) => this.fetchLabelValues(key)));
     return DEFAULT_KEYS.reduce((acc, key, i) => ({ ...acc, [key]: values[i] }), {});
   });
+}
+
+function getNameLabelValue(promQuery: string, tokens: any): string {
+  let nameLabelValue = '';
+  for (let prop in tokens) {
+    if (typeof tokens[prop] === 'string') {
+      nameLabelValue = tokens[prop] as string;
+      break;
+    }
+  }
+  return nameLabelValue;
 }

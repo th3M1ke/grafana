@@ -2,6 +2,8 @@
 // https://github.com/mui-org/material-ui/blob/1b096070faf102281f8e3c4f9b2bf50acf91f412/packages/material-ui/src/styles/colorManipulator.js#L97
 // MIT License Copyright (c) 2014 Call-Em-All
 
+import tinycolor from 'tinycolor2';
+
 /**
  * Returns a number whose value is limited to the given range.
  * @param value The value to be clamped
@@ -64,6 +66,19 @@ export function rgbToHex(color: string) {
 
   const { values } = decomposeColor(color);
   return `#${values.map((n: number) => intToHex(n)).join('')}`;
+}
+
+/**
+ * Converts a color to hex6 format if there is no alpha, hex8 if there is.
+ * @param color - Hex, RGB, HSL color
+ * @returns A hex color string, i.e. #ff0000 or #ff0000ff
+ */
+export function asHexString(color: string): string {
+  if (color[0] === '#') {
+    return color;
+  }
+  const tColor = tinycolor(color);
+  return tColor.getAlpha() === 1 ? tColor.toHexString() : tColor.toHex8String();
 }
 
 /**
@@ -240,12 +255,44 @@ export function emphasize(color: string, coefficient = 0.15) {
  * @beta
  */
 export function alpha(color: string, value: number) {
-  const parts = decomposeColor(color);
+  if (color === '') {
+    return '#000000';
+  }
+
   value = clamp(value);
 
-  if (parts.type === 'rgb' || parts.type === 'hsl') {
-    parts.type += 'a';
+  // hex 3, hex 4 (w/alpha), hex 6, hex 8 (w/alpha)
+  if (color[0] === '#') {
+    if (color.length === 9) {
+      color = color.substring(0, 7);
+    } else if (color.length <= 5) {
+      let c = '#';
+      for (let i = 1; i < 4; i++) {
+        c += color[i] + color[i];
+      }
+      color = c;
+    }
+
+    return (
+      color +
+      Math.round(value * 255)
+        .toString(16)
+        .padStart(2, '0')
+    );
   }
+  // rgb(, hsl(
+  else if (color[3] === '(') {
+    // rgb() and hsl() do not require the "a" suffix to accept alpha values in modern browsers:
+    // https://developer.mozilla.org/en-US/docs/Web/CSS/color_value/rgb()#accepts_alpha_value
+    return color.replace(')', `, ${value})`);
+  }
+  // rgba(, hsla(
+  else if (color[4] === '(') {
+    return color.substring(0, color.lastIndexOf(',')) + `, ${value})`;
+  }
+
+  const parts = decomposeColor(color);
+
   if (parts.type === 'color') {
     parts.values[3] = `/${value}`;
   } else {

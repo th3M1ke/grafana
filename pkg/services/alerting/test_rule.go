@@ -14,7 +14,7 @@ func (e *AlertEngine) AlertTest(orgID int64, dashboard *simplejson.Json, panelID
 	dash := models.NewDashboardFromJson(dashboard)
 
 	extractor := NewDashAlertExtractor(dash, orgID, user)
-	alerts, err := extractor.GetAlerts()
+	alerts, err := extractor.GetAlerts(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -23,7 +23,7 @@ func (e *AlertEngine) AlertTest(orgID int64, dashboard *simplejson.Json, panelID
 		if alert.PanelId != panelID {
 			continue
 		}
-		rule, err := NewRuleFromDBAlert(alert, true)
+		rule, err := NewRuleFromDBAlert(context.Background(), alert, true)
 		if err != nil {
 			return nil, err
 		}

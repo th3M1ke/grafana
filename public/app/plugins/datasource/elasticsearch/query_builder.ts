@@ -1,3 +1,4 @@
+import { InternalTimeZones } from '@grafana/data';
 import { gte, lt } from 'semver';
 import {
   Filters,
@@ -15,7 +16,7 @@ import {
   MetricAggregationWithInlineScript,
 } from './components/QueryEditor/MetricAggregationsEditor/aggregations';
 import { defaultBucketAgg, defaultMetricAgg, findMetricById, highlightTags } from './query_def';
-import { ElasticsearchQuery } from './types';
+import { ElasticsearchQuery, TermsQuery } from './types';
 import { convertOrderByToMetricId, getScriptValue } from './utils';
 import { populateLogzioQuery } from './query_populator.logzio'; // LOGZ.IO GRAFANA CHANGE :: DEV-18135 populate query with logzio extensions
 
@@ -95,18 +96,27 @@ export class ElasticQueryBuilder {
   getDateHistogramAgg(aggDef: DateHistogram) {
     const esAgg: any = {};
     const settings = aggDef.settings || {};
-    esAgg.interval = settings.interval;
-    esAgg.field = this.timeField;
+
+    esAgg.field = aggDef.field || this.timeField;
     esAgg.min_doc_count = settings.min_doc_count || 0;
     esAgg.extended_bounds = { min: '$timeFrom', max: '$timeTo' };
     esAgg.format = 'epoch_millis';
+    if (settings.timeZone && settings.timeZone !== InternalTimeZones.utc) {
+      esAgg.time_zone = settings.timeZone;
+    }
 
     if (settings.offset !== '') {
       esAgg.offset = settings.offset;
     }
 
-    if (esAgg.interval === 'auto') {
-      esAgg.interval = '$__interval';
+    const interval = settings.interval === 'auto' ? '$__interval' : settings.interval;
+
+    if (gte(this.esVersion, '8.0.0')) {
+      // The deprecation was actually introduced in 7.0.0, we might want to use that instead of the removal date,
+      // but it woudl be a breaking change on our side.
+      esAgg.fixed_interval = interval;
+    } else {
+      esAgg.interval = interval;
     }
 
     return esAgg;
@@ -204,7 +214,7 @@ export class ElasticQueryBuilder {
     }
   }
 
-  build(target: ElasticsearchQuery, adhocFilters?: any, queryString?: string) {
+  build(target: ElasticsearchQuery, adhocFilters?: any) {
     // make sure query has defaults;
     target.metrics = target.metrics || [defaultMetricAgg()];
     target.bucketAggs = target.bucketAggs || [defaultBucketAgg()];
@@ -212,22 +222,26 @@ export class ElasticQueryBuilder {
     let metric: MetricAggregation;
 
     let i, j, pv, nestedAggs;
-    const query = {
+    const query: any = {
       size: 0,
       query: {
         bool: {
-          filter: [
-            { range: this.getRangeFilter() },
-            {
-              query_string: {
-                analyze_wildcard: true,
-                query: queryString,
-              },
-            },
-          ],
+          filter: [{ range: this.getRangeFilter() }],
         },
       },
     };
+
+    if (target.query && target.query !== '') {
+      query.query.bool.filter = [
+        ...query.query.bool.filter,
+        {
+          query_string: {
+            analyze_wildcard: true,
+            query: target.query,
+          },
+        },
+      ];
+    }
 
     this.addAdhocFilters(query, adhocFilters);
 
@@ -299,7 +313,7 @@ export class ElasticQueryBuilder {
       }
 
       const aggField: any = {};
-      let metricAgg: any = null;
+      let metricAgg: any = {};
 
       if (isPipelineAggregation(metric)) {
         if (isPipelineAggregationWithMultipleBucketPaths(metric)) {
@@ -354,32 +368,47 @@ export class ElasticQueryBuilder {
         // Elasticsearch isn't generally too picky about the data types in the request body,
         // however some fields are required to be numeric.
         // Users might have already created some of those with before, where the values were numbers.
-        if (metric.type === 'moving_avg') {
-          metricAgg = {
-            ...metricAgg,
-            ...(metricAgg?.window !== undefined && { window: this.toNumber(metricAgg.window) }),
-            ...(metricAgg?.predict !== undefined && { predict: this.toNumber(metricAgg.predict) }),
-            ...(isMovingAverageWithModelSettings(metric) && {
-              settings: {
-                ...metricAgg.settings,
-                ...Object.fromEntries(
-                  Object.entries(metricAgg.settings || {})
-                    // Only format properties that are required to be numbers
-                    .filter(([settingName]) => ['alpha', 'beta', 'gamma', 'period'].includes(settingName))
-                    // omitting undefined
-                    .filter(([_, stringValue]) => stringValue !== undefined)
-                    .map(([_, stringValue]) => [_, this.toNumber(stringValue)])
-                ),
-              },
-            }),
-          };
-        } else if (metric.type === 'serial_diff') {
-          metricAgg = {
-            ...metricAgg,
-            ...(metricAgg.lag !== undefined && {
-              lag: this.toNumber(metricAgg.lag),
-            }),
-          };
+        switch (metric.type) {
+          case 'moving_avg':
+            metricAgg = {
+              ...metricAgg,
+              ...(metricAgg?.window !== undefined && { window: this.toNumber(metricAgg.window) }),
+              ...(metricAgg?.predict !== undefined && { predict: this.toNumber(metricAgg.predict) }),
+              ...(isMovingAverageWithModelSettings(metric) && {
+                settings: {
+                  ...metricAgg.settings,
+                  ...Object.fromEntries(
+                    Object.entries(metricAgg.settings || {})
+                      // Only format properties that are required to be numbers
+                      .filter(([settingName]) => ['alpha', 'beta', 'gamma', 'period'].includes(settingName))
+                      // omitting undefined
+                      .filter(([_, stringValue]) => stringValue !== undefined)
+                      .map(([_, stringValue]) => [_, this.toNumber(stringValue)])
+                  ),
+                },
+              }),
+            };
+            break;
+
+          case 'serial_diff':
+            metricAgg = {
+              ...metricAgg,
+              ...(metricAgg.lag !== undefined && {
+                lag: this.toNumber(metricAgg.lag),
+              }),
+            };
+            break;
+
+          case 'top_metrics':
+            metricAgg = {
+              metrics: metric.settings?.metrics?.map((field) => ({ field })),
+              size: 1,
+            };
+
+            if (metric.settings?.orderBy) {
+              metricAgg.sort = [{ [metric.settings?.orderBy]: metric.settings?.order }];
+            }
+            break;
         }
       }
 
@@ -409,7 +438,7 @@ export class ElasticQueryBuilder {
     return parsedValue;
   }
 
-  getTermsQuery(queryDef: any) {
+  getTermsQuery(queryDef: TermsQuery) {
     const query: any = {
       size: 0,
       query: {
@@ -469,7 +498,7 @@ export class ElasticQueryBuilder {
     return query;
   }
 
-  getLogsQuery(target: ElasticsearchQuery, limit: number, adhocFilters?: any, querystring?: string) {
+  getLogsQuery(target: ElasticsearchQuery, limit: number, adhocFilters?: any) {
     let query: any = {
       size: 0,
       query: {
@@ -485,7 +514,7 @@ export class ElasticQueryBuilder {
       query.query.bool.filter.push({
         query_string: {
           analyze_wildcard: true,
-          query: querystring,
+          query: target.query,
         },
       });
     }
@@ -494,7 +523,7 @@ export class ElasticQueryBuilder {
 
     return {
       ...query,
-      aggs: this.build(target, null, querystring).aggs,
+      aggs: this.build(target, null).aggs,
       highlight: {
         fields: {
           '*': {},

@@ -17,14 +17,8 @@ const stripBaseFromUrl = (url: string): string => {
   const isAbsoluteUrl = url.startsWith('http');
   let segmentToStrip = appSubUrl;
 
-  if (!url.startsWith('/')) {
+  if (!url.startsWith('/') || isAbsoluteUrl) {
     segmentToStrip = `${window.location.origin}${appSubUrl}`;
-  }
-
-  if (isAbsoluteUrl) {
-    segmentToStrip = url.startsWith(`${window.location.origin}${appSubUrl}`)
-      ? `${window.location.origin}${appSubUrl}`
-      : `${window.location.origin}`;
   }
 
   return url.length > 0 && url.indexOf(segmentToStrip) === 0 ? url.slice(segmentToStrip.length - stripExtraChars) : url;
@@ -40,6 +34,27 @@ const assureBaseUrl = (url: string): string => {
     return `${grafanaConfig.appSubUrl}${stripBaseFromUrl(url)}`;
   }
   return url;
+};
+
+/**
+ * Update URL or search param string `init` with new params `partial`.
+ */
+const updateSearchParams = (init: string, partial: string) => {
+  const urlSearchParams = new URLSearchParams(partial);
+
+  // Check if full URL
+  try {
+    const curURL = new URL(init);
+    urlSearchParams.forEach((val, key) => curURL.searchParams.set(key, val));
+    return curURL.href;
+  } catch {
+    // assume search params
+    const newSearchParams = new URLSearchParams(init);
+    urlSearchParams.forEach((v, k) => {
+      newSearchParams.set(k, v);
+    });
+    return '?' + newSearchParams.toString();
+  }
 };
 
 interface LocationUtilDependencies {
@@ -63,6 +78,7 @@ export const locationUtil = {
   },
   stripBaseFromUrl,
   assureBaseUrl,
+  updateSearchParams,
   getTimeRangeUrlParams: () => {
     if (!getTimeRangeUrlParams) {
       return null;

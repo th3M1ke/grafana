@@ -1,5 +1,5 @@
 export { Icon } from './Icon/Icon';
-export { IconButton } from './IconButton/IconButton';
+export { IconButton, IconButtonVariant } from './IconButton/IconButton';
 export { ConfirmButton } from './ConfirmButton/ConfirmButton';
 export { DeleteButton } from './ConfirmButton/DeleteButton';
 export { Tooltip, PopoverContent } from './Tooltip/Tooltip';
@@ -21,9 +21,16 @@ export { EmptySearchResult } from './EmptySearchResult/EmptySearchResult';
 export { UnitPicker } from './UnitPicker/UnitPicker';
 export { StatsPicker } from './StatsPicker/StatsPicker';
 export { RefreshPicker, defaultIntervals } from './RefreshPicker/RefreshPicker';
-export { TimeRangePicker } from './TimePicker/TimeRangePicker';
-export { TimeOfDayPicker } from './TimePicker/TimeOfDayPicker';
-export { TimeZonePicker } from './TimePicker/TimeZonePicker';
+export { TimeRangePicker, TimeRangePickerProps } from './DateTimePickers/TimeRangePicker';
+export { TimeOfDayPicker } from './DateTimePickers/TimeOfDayPicker';
+export { TimeZonePicker } from './DateTimePickers/TimeZonePicker';
+export { WeekStartPicker } from './DateTimePickers/WeekStartPicker';
+export { DatePicker, DatePickerProps } from './DateTimePickers/DatePicker/DatePicker';
+export {
+  DatePickerWithInput,
+  DatePickerWithInputProps,
+} from './DateTimePickers/DatePickerWithInput/DatePickerWithInput';
+export { DateTimePicker } from './DateTimePickers/DateTimePicker/DateTimePicker';
 export { List } from './List/List';
 export { TagsInput } from './TagsInput/TagsInput';
 export { Pagination } from './Pagination/Pagination';
@@ -35,8 +42,18 @@ export { ConfirmModal, ConfirmModalProps } from './ConfirmModal/ConfirmModal';
 export { QueryField } from './QueryField/QueryField';
 
 // Code editor
-export { CodeEditor } from './Monaco/CodeEditorLazy';
-export { Monaco, MonacoEditor, CodeEditorSuggestionItem, CodeEditorSuggestionItemKind } from './Monaco/types';
+export { CodeEditor } from './Monaco/CodeEditor';
+
+export { ReactMonacoEditorLazy as ReactMonacoEditor } from './Monaco/ReactMonacoEditorLazy';
+
+export {
+  Monaco,
+  monacoTypes,
+  MonacoEditor,
+  MonacoOptions as CodeEditorMonacoOptions,
+  CodeEditorSuggestionItem,
+  CodeEditorSuggestionItemKind,
+} from './Monaco/types';
 export { variableSuggestionToCodeEditorSuggestion } from './Monaco/utils';
 
 // TODO: namespace
@@ -76,8 +93,6 @@ export {
   VizTooltip,
   VizTooltipContainer,
   SeriesTable,
-  VizTooltipOptions,
-  TooltipDisplayMode,
   SeriesTableProps,
   SeriesTableRow,
   SeriesTableRowProps,
@@ -100,7 +115,6 @@ export {
 } from './PanelChrome';
 export { VizLayout, VizLayoutComponentType, VizLayoutLegendProps, VizLayoutProps } from './VizLayout/VizLayout';
 export { VizLegendItem, SeriesVisibilityChangeBehavior } from './VizLegend/types';
-export { LegendPlacement, LegendDisplayMode, VizLegendOptions } from './VizLegend/models.gen';
 export { VizLegend } from './VizLegend/VizLegend';
 export { VizLegendListItem } from './VizLegend/VizLegendListItem';
 
@@ -140,14 +154,14 @@ export {
   withErrorBoundary,
 } from './ErrorBoundary/ErrorBoundary';
 export { ErrorWithStack } from './ErrorBoundary/ErrorWithStack';
-export { AlphaNotice } from './AlphaNotice/AlphaNotice';
 export { DataSourceHttpSettings } from './DataSourceSettings/DataSourceHttpSettings';
+export { AlertingSettings } from './DataSourceSettings/AlertingSettings';
 export { TLSAuthSettings } from './DataSourceSettings/TLSAuthSettings';
 export { CertificationKey } from './DataSourceSettings/CertificationKey';
 export { Spinner } from './Spinner/Spinner';
 export { FadeTransition } from './transitions/FadeTransition';
 export { SlideOutTransition } from './transitions/SlideOutTransition';
-export { Segment, SegmentAsync, SegmentInput, SegmentSelect } from './Segment/';
+export { Segment, SegmentAsync, SegmentInput, SegmentSelect, SegmentSection } from './Segment/';
 export { Drawer } from './Drawer/Drawer';
 export { Slider } from './Slider/Slider';
 export { RangeSlider } from './Slider/RangeSlider';
@@ -162,8 +176,9 @@ export { MultiSelectValueEditor } from './OptionsUI/multiSelect';
 
 // Next-gen forms
 export { Form } from './Forms/Form';
+export { sharedInputStyle } from './Forms/commonStyles';
 export { InputControl } from './InputControl';
-export { Button, LinkButton, ButtonVariant, ToolbarButton, ButtonGroup, ToolbarButtonRow } from './Button';
+export { Button, LinkButton, ButtonVariant, ToolbarButton, ButtonGroup, ToolbarButtonRow, ButtonProps } from './Button';
 export { ValuePicker } from './ValuePicker/ValuePicker';
 export { fieldMatchersUI } from './MatchersUI/fieldMatchersUI';
 export { getFormStyles } from './Forms/getFormStyles';
@@ -180,14 +195,20 @@ export { InlineLabel } from './Forms/InlineLabel';
 export { InlineFieldRow } from './Forms/InlineFieldRow';
 export { FieldArray } from './Forms/FieldArray';
 
+// Select
 export { default as resetSelectStyles } from './Select/resetSelectStyles';
+export { selectOptionInTest } from './Select/test-utils';
 export * from './Select/Select';
+export { DropdownIndicator } from './Select/DropdownIndicator';
+export { getSelectStyles } from './Select/getSelectStyles';
+export * from './Select/types';
 
 export { HorizontalGroup, VerticalGroup, Container } from './Layout/Layout';
 export { Badge, BadgeColor, BadgeProps } from './Badge/Badge';
 export { RadioButtonGroup } from './Forms/RadioButtonGroup/RadioButtonGroup';
 
-export { Input } from './Input/Input';
+export { Input, getInputStyles } from './Input/Input';
+export { FilterInput } from './FilterInput/FilterInput';
 export { FormInputSize } from './Forms/types';
 
 export { Switch, InlineSwitch } from './Switch/Switch';
@@ -195,12 +216,12 @@ export { Checkbox } from './Forms/Checkbox';
 
 export { TextArea } from './TextArea/TextArea';
 export { FileUpload } from './FileUpload/FileUpload';
-export { TimeRangeInput } from './TimePicker/TimeRangeInput';
-export { RelativeTimeRangePicker } from './TimePicker/RelativeTimeRangePicker/RelativeTimeRangePicker';
+export * from './FileDropzone';
+export { TimeRangeInput } from './DateTimePickers/TimeRangeInput';
+export { RelativeTimeRangePicker } from './DateTimePickers/RelativeTimeRangePicker/RelativeTimeRangePicker';
 export { Card, Props as CardProps, getCardStyles } from './Card/Card';
 export { CardContainer, CardContainerProps } from './Card/CardContainer';
 export { FormattedValueDisplay } from './FormattedValueDisplay/FormattedValueDisplay';
-
 export { ButtonSelect } from './Dropdown/ButtonSelect';
 export { PluginSignatureBadge, PluginSignatureBadgeProps } from './PluginSignatureBadge/PluginSignatureBadge';
 
@@ -233,18 +254,20 @@ export { LegacyForms, LegacyInputStatus };
 
 // WIP, need renames and exports cleanup
 export * from './uPlot/config';
-export { ScaleDistribution } from './uPlot/models.gen';
-export { UPlotConfigBuilder, UPlotConfigPrepFn } from './uPlot/config/UPlotConfigBuilder';
+export { ScaleDistribution } from '@grafana/schema';
+export { UPlotConfigBuilder } from './uPlot/config/UPlotConfigBuilder';
+export { UPLOT_AXIS_FONT_SIZE } from './uPlot/config/UPlotAxisBuilder';
 export { UPlotChart } from './uPlot/Plot';
 export { PlotLegend } from './uPlot/PlotLegend';
 export * from './uPlot/geometries';
 export * from './uPlot/plugins';
-export { usePlotContext } from './uPlot/context';
-export { PlotTooltipInterpolator } from './uPlot/types';
+export { PlotTooltipInterpolator, PlotSelection } from './uPlot/types';
+export { UPlotConfigPrepFn } from './uPlot/config/UPlotConfigBuilder';
 export { GraphNG, GraphNGProps, FIXED_UNIT } from './GraphNG/GraphNG';
 export { TimeSeries } from './TimeSeries/TimeSeries';
 export { useGraphNGContext } from './GraphNG/hooks';
-export { preparePlotFrame } from './GraphNG/utils';
+export { preparePlotFrame, buildScaleKey } from './GraphNG/utils';
 export { GraphNGLegendEvent } from './GraphNG/types';
 export * from './PanelChrome/types';
 export { EmotionPerfTest } from './ThemeDemos/EmotionPerfTest';
+export { Label as BrowserLabel } from './BrowserLabel/Label';

@@ -3,7 +3,7 @@ import { delay } from 'rxjs/operators';
 import { setDataSourceSrv } from '@grafana/runtime';
 import { AlertState, AlertStateInfo } from '@grafana/data';
 
-import * as annotationsSrv from '../../../annotations/annotations_srv';
+import * as annotationsSrv from '../../../annotations/executeAnnotationQuery';
 import { getDefaultOptions, LEGACY_DS_NAME, NEXT_GEN_DS_NAME, toAsyncOfResult } from './testHelpers';
 import { backendSrv } from '../../../../core/services/backend_srv';
 import { DashboardQueryRunner, DashboardQueryRunnerResult } from './types';
@@ -23,8 +23,8 @@ function getTestContext() {
   const runner = createDashboardQueryRunner({ dashboard: options.dashboard, timeSrv: timeSrvMock });
 
   const getResults: AlertStateInfo[] = [
-    { id: 1, state: AlertState.Alerting, newStateDate: '2021-01-01', dashboardId: 1, panelId: 1 },
-    { id: 2, state: AlertState.Alerting, newStateDate: '2021-02-01', dashboardId: 1, panelId: 2 },
+    { id: 1, state: AlertState.Alerting, dashboardId: 1, panelId: 1 },
+    { id: 2, state: AlertState.Alerting, dashboardId: 1, panelId: 2 },
   ];
   const getMock = jest.spyOn(backendSrv, 'get').mockResolvedValue(getResults);
   const executeAnnotationQueryMock = jest
@@ -64,10 +64,10 @@ function expectOnResults(args: {
     next: (value) => {
       try {
         expectCallback(value);
-        subscription.unsubscribe();
+        subscription?.unsubscribe();
         done();
       } catch (err) {
-        subscription.unsubscribe();
+        subscription?.unsubscribe();
         done.fail(err);
       }
     },
@@ -94,6 +94,56 @@ describe('DashboardQueryRunnerImpl', () => {
       });
 
       runner.run(options);
+    });
+  });
+
+  describe('when calling run and all workers succeed but take longer than 200ms', () => {
+    it('then it should return the empty results', (done) => {
+      const { runner, options, annotationQueryMock, executeAnnotationQueryMock, getMock } = getTestContext();
+      const wait = 201;
+      executeAnnotationQueryMock.mockReturnValue(toAsyncOfResult({ events: [{ id: 'NextGen' }] }).pipe(delay(wait)));
+
+      expectOnResults({
+        runner,
+        panelId: 1,
+        done,
+        expect: (results) => {
+          // should have one alert state, one snapshot, one legacy and one next gen result
+          // having both snapshot and legacy/next gen is a imaginary example for testing purposes and doesn't exist for real
+          expect(results).toEqual({ annotations: [] });
+          expect(annotationQueryMock).toHaveBeenCalledTimes(1);
+          expect(executeAnnotationQueryMock).toHaveBeenCalledTimes(1);
+          expect(getMock).toHaveBeenCalledTimes(1);
+        },
+      });
+
+      runner.run(options);
+    });
+  });
+
+  describe('when calling run and all workers succeed but the subscriber subscribes after the run', () => {
+    it('then it should return the last results', (done) => {
+      const { runner, options, annotationQueryMock, executeAnnotationQueryMock, getMock } = getTestContext();
+
+      runner.run(options);
+
+      setTimeout(
+        () =>
+          expectOnResults({
+            runner,
+            panelId: 1,
+            done,
+            expect: (results) => {
+              // should have one alert state, one snapshot, one legacy and one next gen result
+              // having both snapshot and legacy/next gen is a imaginary example for testing purposes and doesn't exist for real
+              expect(results).toEqual(getExpectedForAllResult());
+              expect(annotationQueryMock).toHaveBeenCalledTimes(1);
+              expect(executeAnnotationQueryMock).toHaveBeenCalledTimes(1);
+              expect(getMock).toHaveBeenCalledTimes(1);
+            },
+          }),
+        200
+      ); // faking a late subscriber to make sure we get the latest results
     });
   });
 
@@ -241,7 +291,6 @@ function getExpectedForAllResult(): DashboardQueryRunnerResult {
     alertState: {
       dashboardId: 1,
       id: 1,
-      newStateDate: '2021-01-01',
       panelId: 1,
       state: AlertState.Alerting,
     },

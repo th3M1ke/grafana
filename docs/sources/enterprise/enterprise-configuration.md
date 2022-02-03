@@ -34,6 +34,12 @@ side to be valid for a different number of users or a new duration,
 your Grafana instance will be updated with the new terms
 automatically. Defaults to `true`.
 
+### license_validation_type
+
+> **Note:** Available in Grafana Enterprise v8.3+.
+
+When set to `aws`, Grafana will validate its license status with Amazon Web Services (AWS) instead of with Grafana Labs. Only use this setting if you purchased an Enterprise license from AWS Marketplace. Defaults to empty, which means that by default Grafana Enterprise will validate using a license issued by Grafana Labs. For details about licenses issued by AWS, refer to [Activate a Grafana Enterprise license purchased through AWS Marketplace]({{< relref "../enterprise/license/activate-aws-marketplace-license/" >}}).
+
 ## [white_labeling]
 
 ### app_title
@@ -265,7 +271,7 @@ List of comma- or space-separated organizations. Each user must be a member of a
 
 ### org_mapping
 
-List of comma- or space-separated Organization:OrgId mappings.
+List of comma- or space-separated Organization:OrgId:Role mappings. Organization can be `*` meaning "All users". Role is optional and can have the following values: `Viewer`, `Editor` or `Admin`.
 
 ### role_values_editor
 
@@ -331,6 +337,12 @@ A list of headers that are stripped from the outgoing data source and alerting r
 
 A list of cookies that are stripped from the outgoing data source and alerting requests.
 
+## [security.encryption]
+
+### algorithm
+
+Encryption algorithm used to encrypt secrets stored in the database and cookies. Possible values are `aes-cfb` (default) and `aes-gcm`. AES-CFB stands for _Advanced Encryption Standard_ in _cipher feedback_ mode, and AES-GCM stands for _Advanced Encryption Standard_ in _Galois/Counter Mode_.
+
 ## [caching]
 
 > **Note:** Available in Grafana Enterprise v7.5 and later versions.
@@ -340,6 +352,8 @@ When query caching is enabled, Grafana can temporarily store the results of data
 ### backend
 
 The caching backend to use when storing cached queries. Options: `memory`, `redis`, and `memcached`.
+
+The default is `memory`.
 
 ### enabled
 
@@ -351,11 +365,57 @@ This value is `true` by default.
 
 ### ttl
 
-_Time to live_ (TTL) is the time that a query result is stored in the caching system before it is deleted or refreshed. This setting defines the time to live for query caching, when TTL is not configured in data source settings. The default value is `5m` (5 minutes).
+_Time to live_ (TTL) is the time that a query result is stored in the caching system before it is deleted or refreshed. This setting defines the time to live for query caching, when TTL is not configured in data source settings. The default value is `1m` (1 minute).
+
+### max_ttl
+
+The max duration that a query result is stored in the caching system before it is deleted or refreshed. This value will override `ttl` config option or data source setting if the `ttl` value is greater than `max_ttl`. To disable this constraint, set this value to `0s`.
+
+The default is `0s` (disabled).
+
+> **Note:** Disabling this constraint is not recommended in production environments.
 
 ### max_value_mb
 
 This value limits the size of a single cache value. If a cache value (or query result) exceeds this size, then it is not cached. To disable this limit, set this value to `0`.
+
+The default is `1`.
+
+### connection_timeout
+
+This setting defines the duration to wait for a connection to the caching backend.
+
+The default is `5s`.
+
+### read_timeout
+
+This setting defines the duration to wait for the caching backend to return a cached result. To disable this timeout, set this value to `0s`.
+
+The default is `0s` (disabled).
+
+> **Note:** Disabling this timeout is not recommended in production environments.
+
+### write_timeout
+
+This setting defines the number of seconds to wait for the caching backend to store a result. To disable this timeout, set this value to `0s`.
+
+The default is `0s` (disabled).
+
+> **Note:** Disabling this timeout is not recommended in production environments.
+
+## [caching.encryption]
+
+### enabled
+
+When 'enabled' is `true`, query values in the cache are encrypted.
+
+The default is `false`.
+
+### encryption_key
+
+A string used to generate a key for encrypting the cache. For the encrypted cache data to persist between Grafana restarts, you must specify this key. If it is empty when encryption is enabled, then the key is automatically generated on startup, and the cache clears upon restarts.
+
+The default is `""`.
 
 ## [caching.memory]
 
@@ -363,14 +423,17 @@ This value limits the size of a single cache value. If a cache value (or query r
 
 When storing cache data in-memory, this setting defines how often a background process cleans up stale data from the in-memory cache. More frequent "garbage collection" can keep memory usage from climbing but will increase CPU usage.
 
+The default is `1m`.
+
 ### max_size_mb
 
-The maximum size of the in-memory cache in megabytes. Once this size is reached, new cache items are rejected. For more flexible control over cache eviction policies and size, use the Redis or Memcached backend. 
+The maximum size of the in-memory cache in megabytes. Once this size is reached, new cache items are rejected. For more flexible control over cache eviction policies and size, use the Redis or Memcached backend.
 
-To disable the maximum, set this value to `0`. 
+To disable the maximum, set this value to `0`.
+
+The default is `25`.
 
 > **Note:** Disabling the maximum is not recommended in production environments.
-
 
 ## [caching.redis]
 
@@ -378,12 +441,69 @@ To disable the maximum, set this value to `0`.
 
 The full Redis URL of your Redis server. Example: `redis://localhost:6739/0`.
 
+The default is `"redis://localhost:6379"`.
+
+### cluster
+
+A comma-separated list of Redis cluster members in `host:port` format. For example, `localhost:7000, localhost: 7001, localhost:7002`.
+
+> **Note:** If you have specify `cluster`, the value for `url` is ignored.
+
 ### prefix
 
 A string that prefixes all Redis keys. This value must be set if using a shared database in Redis. If `prefix` is empty, then one will not be used.
+
+The default is `"grafana"`.
 
 ## [caching.memcached]
 
 ### memcached_servers
 
-A space-separated list of memcached servers. Example: `memcached-server-1:11211 memcached-server-2:11212 memcached-server-3:11211`. Or if there's only one server: `memcached-server:11211`
+A space-separated list of memcached servers. Example: `memcached-server-1:11211 memcached-server-2:11212 memcached-server-3:11211`. Or if there's only one server: `memcached-server:11211`.
+
+The default is `"localhost:11211"`.
+
+## [recorded_queries]
+
+### enabled
+
+Whether the recorded queries feature is enabled
+
+### min_interval
+
+Sets the minimum interval to enforce between query evaluations. The default value is `10s`. Query evaluation will be
+adjusted if they are less than this value. Higher values can help with resource management.
+
+The interval string is a possibly signed sequence of decimal numbers, followed by a unit suffix (ms, s, m, h, d), e.g.
+30s or 1m.
+
+### max_queries
+
+The maximum number of recorded queries that can exist.
+
+### default_remote_write_datasource_uid
+
+The UID of the datasource where the query data will be written.
+
+If all `default_remote_write_*` properties are set, this information will be populated at startup. If a remote write target has
+already been configured, nothing will happen.
+
+### default_remote_write_path
+
+The api path where metrics will be written
+
+If all `default_remote_write_*` properties are set, this information will be populated at startup. If a remote write target has
+already been configured, nothing will happen.
+
+### default_remote_write_datasource_org_id
+
+The org id of the datasource where the query data will be written.
+
+If all `default_remote_write_*` properties are set, this information will be populated at startup. If a remote write target has
+already been configured, nothing will happen.
+
+## [feature_highlights]
+
+### enabled
+
+Whether the feature highlights feature is enabled

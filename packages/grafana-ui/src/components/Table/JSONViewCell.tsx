@@ -23,7 +23,7 @@ export function JSONViewCell(props: TableCellProps): JSX.Element {
       value = JSON.parse(value);
     } catch {} // ignore errors
   } else {
-    displayValue = JSON.stringify(value);
+    displayValue = JSON.stringify(value, null, ' ');
   }
 
   const content = <JSONTooltip value={value} />;
@@ -58,7 +58,7 @@ function getStyles(theme: GrafanaTheme2) {
       padding: ${theme.spacing(0.5)};
     `,
     json: css`
-      max-width: fit-content;
+      width: fit-content;
       max-height: 70vh;
       overflow-y: auto;
     `,

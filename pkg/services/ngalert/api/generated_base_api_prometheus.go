@@ -17,12 +17,25 @@ import (
 	"github.com/grafana/grafana/pkg/services/ngalert/metrics"
 )
 
+type PrometheusApiForkingService interface {
+	RouteGetAlertStatuses(*models.ReqContext) response.Response
+	RouteGetRuleStatuses(*models.ReqContext) response.Response
+}
+
 type PrometheusApiService interface {
 	RouteGetAlertStatuses(*models.ReqContext) response.Response
 	RouteGetRuleStatuses(*models.ReqContext) response.Response
 }
 
-func (api *API) RegisterPrometheusApiEndpoints(srv PrometheusApiService, m *metrics.Metrics) {
+func (f *ForkedPrometheusApi) RouteGetAlertStatuses(ctx *models.ReqContext) response.Response {
+	return f.forkRouteGetAlertStatuses(ctx)
+}
+
+func (f *ForkedPrometheusApi) RouteGetRuleStatuses(ctx *models.ReqContext) response.Response {
+	return f.forkRouteGetRuleStatuses(ctx)
+}
+
+func (api *API) RegisterPrometheusApiEndpoints(srv PrometheusApiForkingService, m *metrics.API) {
 	api.RouteRegister.Group("", func(group routing.RouteRegister) {
 		group.Get(
 			toMacaronPath("/api/prometheus/{Recipient}/api/v1/alerts"),

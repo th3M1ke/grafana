@@ -1,5 +1,7 @@
 import { FieldType, MutableDataFrame } from '@grafana/data';
-import { createTableFrame } from './resultTransformer';
+import { createTableFrame, transformToOTLP, transformFromOTLP } from './resultTransformer';
+import { otlpDataFrameToResponse, otlpDataFrameFromResponse, otlpResponse } from './testResponse';
+import { collectorTypes } from '@opentelemetry/exporter-collector';
 
 describe('transformTraceList()', () => {
   const lokiDataFrame = new MutableDataFrame({
@@ -33,5 +35,22 @@ describe('transformTraceList()', () => {
     // Second match in new line
     expect(frame.fields[0].values.get(1)).toBe('2020-02-12T15:05:15.265Z');
     expect(frame.fields[1].values.get(1)).toBe('as');
+  });
+});
+
+describe('transformToOTLP()', () => {
+  test('transforms dataframe to OTLP format', () => {
+    const otlp = transformToOTLP(otlpDataFrameToResponse);
+    expect(otlp).toMatchObject(otlpResponse);
+  });
+});
+
+describe('transformFromOTLP()', () => {
+  test('transforms OTLP format to dataFrame', () => {
+    const res = transformFromOTLP(
+      (otlpResponse.batches as unknown) as collectorTypes.opentelemetryProto.trace.v1.ResourceSpans[],
+      false
+    );
+    expect(res.data[0]).toMatchObject(otlpDataFrameFromResponse);
   });
 });

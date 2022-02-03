@@ -1,11 +1,11 @@
 import React from 'react';
-import { EventsWithValidation, regexValidation, LegacyForms } from '@grafana/ui';
-const { Select, Input, FormField } = LegacyForms;
+import { FieldSet, InlineField, Input, Select, InlineSwitch } from '@grafana/ui';
 import { ElasticsearchOptions, Interval } from '../types';
 import { DataSourceSettings, SelectableValue } from '@grafana/data';
-import { gte, lt } from 'semver';
+import { gte, lt, valid } from 'semver';
+import { isTruthy } from './utils';
 
-const indexPatternTypes = [
+const indexPatternTypes: Array<SelectableValue<'none' | Interval>> = [
   { label: 'No pattern', value: 'none' },
   { label: 'Hourly', value: 'Hourly', example: '[logstash-]YYYY.MM.DD.HH' },
   { label: 'Daily', value: 'Daily', example: '[logstash-]YYYY.MM.DD' },
@@ -14,12 +14,19 @@ const indexPatternTypes = [
   { label: 'Yearly', value: 'Yearly', example: '[logstash-]YYYY' },
 ];
 
-const esVersions = [
+const esVersions: SelectableValue[] = [
   { label: '2.x', value: '2.0.0' },
   { label: '5.x', value: '5.0.0' },
   { label: '5.6+', value: '5.6.0' },
   { label: '6.0+', value: '6.0.0' },
   { label: '7.0+', value: '7.0.0' },
+  { label: '7.7+', value: '7.7.0' },
+  { label: '7.10+', value: '7.10.0' },
+  {
+    label: '8.0+',
+    value: '8.0.0',
+    description: 'support for Elasticsearch 8 is currently experimental',
+  },
 ];
 
 type Props = {
@@ -27,125 +34,131 @@ type Props = {
   onChange: (value: DataSourceSettings<ElasticsearchOptions>) => void;
 };
 export const ElasticDetails = ({ value, onChange }: Props) => {
+  const currentVersion = esVersions.find((version) => version.value === value.jsonData.esVersion);
+  const customOption =
+    !currentVersion && valid(value.jsonData.esVersion)
+      ? {
+          label: value.jsonData.esVersion,
+          value: value.jsonData.esVersion,
+        }
+      : undefined;
   return (
     <>
-      <h3 className="page-heading">Elasticsearch details</h3>
-
-      <div className="gf-form-group">
-        <div className="gf-form-inline">
-          <div className="gf-form">
-            <FormField
-              labelWidth={10}
-              inputWidth={15}
-              label="Index name"
-              value={value.database || ''}
-              onChange={changeHandler('database', value, onChange)}
-              placeholder={'es-index-name'}
-              required
-            />
-          </div>
-
-          <div className="gf-form">
-            <FormField
-              labelWidth={10}
-              label="Pattern"
-              inputEl={
-                <Select
-                  options={indexPatternTypes}
-                  onChange={intervalHandler(value, onChange)}
-                  value={indexPatternTypes.find(
-                    (pattern) =>
-                      pattern.value === (value.jsonData.interval === undefined ? 'none' : value.jsonData.interval)
-                  )}
-                />
-              }
-            />
-          </div>
-        </div>
-
-        <div className="gf-form max-width-25">
-          <FormField
-            labelWidth={10}
-            inputWidth={15}
-            label="Time field name"
-            value={value.jsonData.timeField || ''}
-            onChange={jsonDataChangeHandler('timeField', value, onChange)}
+      <FieldSet label="Elasticsearch details">
+        <InlineField label="Index name" labelWidth={26}>
+          <Input
+            id="es_config_indexName"
+            value={value.database || ''}
+            onChange={changeHandler('database', value, onChange)}
+            width={24}
+            placeholder="es-index-name"
             required
           />
-        </div>
+        </InlineField>
 
-        <div className="gf-form">
-          <FormField
-            labelWidth={10}
-            label="Version"
-            inputEl={
-              <Select
-                options={esVersions}
-                onChange={(option) => {
-                  const maxConcurrentShardRequests = getMaxConcurrenShardRequestOrDefault(
-                    value.jsonData.maxConcurrentShardRequests,
-                    option.value!
-                  );
-                  onChange({
-                    ...value,
-                    jsonData: {
-                      ...value.jsonData,
-                      esVersion: option.value!,
-                      maxConcurrentShardRequests,
-                    },
-                  });
-                }}
-                value={esVersions.find((version) => version.value === value.jsonData.esVersion)}
-              />
-            }
+        <InlineField label="Pattern" labelWidth={26}>
+          <Select
+            inputId="es_config_indexPattern"
+            value={indexPatternTypes.find(
+              (pattern) => pattern.value === (value.jsonData.interval === undefined ? 'none' : value.jsonData.interval)
+            )}
+            options={indexPatternTypes}
+            onChange={intervalHandler(value, onChange)}
+            width={24}
+            menuShouldPortal
           />
-        </div>
+        </InlineField>
+
+        <InlineField label="Time field name" labelWidth={26}>
+          <Input
+            id="es_config_timeField"
+            value={value.jsonData.timeField || ''}
+            onChange={jsonDataChangeHandler('timeField', value, onChange)}
+            width={24}
+            placeholder="@timestamp"
+            required
+          />
+        </InlineField>
+
+        <InlineField label="ElasticSearch version" labelWidth={26}>
+          <Select
+            inputId="es_config_version"
+            options={[customOption, ...esVersions].filter(isTruthy)}
+            onChange={(option) => {
+              const maxConcurrentShardRequests = getMaxConcurrenShardRequestOrDefault(
+                value.jsonData.maxConcurrentShardRequests,
+                option.value!
+              );
+              onChange({
+                ...value,
+                jsonData: {
+                  ...value.jsonData,
+                  esVersion: option.value!,
+                  maxConcurrentShardRequests,
+                },
+              });
+            }}
+            value={currentVersion || customOption}
+            width={24}
+            menuShouldPortal
+          />
+        </InlineField>
+
         {gte(value.jsonData.esVersion, '5.6.0') && (
-          <div className="gf-form max-width-30">
-            <FormField
-              aria-label={'Max concurrent Shard Requests input'}
-              labelWidth={15}
-              label="Max concurrent Shard Requests"
+          <InlineField label="Max concurrent Shard Requests" labelWidth={26}>
+            <Input
+              id="es_config_shardRequests"
               value={value.jsonData.maxConcurrentShardRequests || ''}
               onChange={jsonDataChangeHandler('maxConcurrentShardRequests', value, onChange)}
+              width={24}
             />
-          </div>
+          </InlineField>
         )}
-        <div className="gf-form-inline">
-          <div className="gf-form">
-            <FormField
-              labelWidth={10}
-              label="Min time interval"
-              inputEl={
-                <Input
-                  className={'width-6'}
-                  value={value.jsonData.timeInterval || ''}
-                  onChange={jsonDataChangeHandler('timeInterval', value, onChange)}
-                  placeholder="10s"
-                  validationEvents={{
-                    [EventsWithValidation.onBlur]: [
-                      regexValidation(
-                        /^\d+(ms|[Mwdhmsy])$/,
-                        'Value is not valid, you can use number with time unit specifier: y, M, w, d, h, m, s'
-                      ),
-                    ],
-                  }}
-                />
-              }
-              tooltip={
-                <>
-                  A lower limit for the auto group by time interval. Recommended to be set to write frequency, for
-                  example <code>1m</code> if your data is written every minute.
-                </>
-              }
+
+        <InlineField
+          label="Min time interval"
+          labelWidth={26}
+          tooltip={
+            <>
+              A lower limit for the auto group by time interval. Recommended to be set to write frequency, for example{' '}
+              <code>1m</code> if your data is written every minute.
+            </>
+          }
+          error="Value is not valid, you can use number with time unit specifier: y, M, w, d, h, m, s"
+          invalid={!!value.jsonData.timeInterval && !/^\d+(ms|[Mwdhmsy])$/.test(value.jsonData.timeInterval)}
+        >
+          <Input
+            id="es_config_minTimeInterval"
+            value={value.jsonData.timeInterval || ''}
+            onChange={jsonDataChangeHandler('timeInterval', value, onChange)}
+            width={24}
+            placeholder="10s"
+          />
+        </InlineField>
+
+        <InlineField label="X-Pack enabled" labelWidth={26}>
+          <InlineSwitch
+            id="es_config_xpackEnabled"
+            checked={value.jsonData.xpack || false}
+            onChange={jsonDataSwitchChangeHandler('xpack', value, onChange)}
+          />
+        </InlineField>
+
+        {gte(value.jsonData.esVersion, '6.6.0') && value.jsonData.xpack && (
+          <InlineField label="Include Frozen Indices" labelWidth={26}>
+            <InlineSwitch
+              id="es_config_frozenIndices"
+              checked={value.jsonData.includeFrozen ?? false}
+              onChange={jsonDataSwitchChangeHandler('includeFrozen', value, onChange)}
             />
-          </div>
-        </div>
-      </div>
+          </InlineField>
+        )}
+      </FieldSet>
     </>
   );
 };
 
+// TODO: Use change handlers from @grafana/data
 const changeHandler = (
   key: keyof DataSourceSettings<ElasticsearchOptions>,
   value: Props['value'],
@@ -157,6 +170,7 @@ const changeHandler = (
   });
 };
 
+// TODO: Use change handlers from @grafana/data
 const jsonDataChangeHandler = (key: keyof ElasticsearchOptions, value: Props['value'], onChange: Props['onChange']) => (
   event: React.SyntheticEvent<HTMLInputElement | HTMLSelectElement>
 ) => {
@@ -165,6 +179,20 @@ const jsonDataChangeHandler = (key: keyof ElasticsearchOptions, value: Props['va
     jsonData: {
       ...value.jsonData,
       [key]: event.currentTarget.value,
+    },
+  });
+};
+
+const jsonDataSwitchChangeHandler = (
+  key: keyof ElasticsearchOptions,
+  value: Props['value'],
+  onChange: Props['onChange']
+) => (event: React.SyntheticEvent<HTMLInputElement>) => {
+  onChange({
+    ...value,
+    jsonData: {
+      ...value.jsonData,
+      [key]: event.currentTarget.checked,
     },
   });
 };

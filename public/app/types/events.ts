@@ -1,11 +1,4 @@
-import {
-  AnnotationQuery,
-  BusEventBase,
-  BusEventWithPayload,
-  eventFactory,
-  GrafanaTheme2,
-  TimeRange,
-} from '@grafana/data';
+import { AnnotationQuery, BusEventBase, BusEventWithPayload, eventFactory } from '@grafana/data';
 import { IconName } from '@grafana/ui';
 
 /**
@@ -90,29 +83,16 @@ export interface PanelChangeViewPayload {}
  * Events
  */
 
-export const dashLinksUpdated = eventFactory('dash-links-updated');
-export const searchQuery = eventFactory('search-query');
-
 export const dsRequestResponse = eventFactory<DataSourceResponsePayload>('ds-request-response');
 export const dsRequestError = eventFactory<any>('ds-request-error');
-
-export const toggleSidemenuMobile = eventFactory('toggle-sidemenu-mobile');
 export const toggleSidemenuHidden = eventFactory('toggle-sidemenu-hidden');
-
-export const toggleKioskMode = eventFactory<ToggleKioskModePayload>('toggle-kiosk-mode');
-
-export const timeRangeUpdated = eventFactory<TimeRange>('time-range-updated');
 export const templateVariableValueUpdated = eventFactory('template-variable-value-updated');
-
 export const graphClicked = eventFactory<GraphClickedPayload>('graph-click');
 
+/**
+ * @internal
+ */
 export const thresholdChanged = eventFactory<ThresholdChangedPayload>('threshold-changed');
-
-export const zoomOut = eventFactory<number>('zoom-out');
-
-export const shiftTime = eventFactory<number>('shift-time');
-
-export const routeUpdated = eventFactory('$routeUpdate');
 
 /**
  * Used for syncing queries badge count in panel edit queries tab
@@ -144,8 +124,8 @@ export class DashboardPanelsChangedEvent extends BusEventBase {
   static type = 'dashboard-panels-changed';
 }
 
-export class RefreshEvent extends BusEventBase {
-  static type = 'refresh';
+export class PanelDirectiveReadyEvent extends BusEventBase {
+  static type = 'panel-directive-ready';
 }
 
 export class PanelDirectiveReadyEvent extends BusEventBase {
@@ -154,10 +134,6 @@ export class PanelDirectiveReadyEvent extends BusEventBase {
 
 export class RenderEvent extends BusEventBase {
   static type = 'render';
-}
-
-export class ThemeChangedEvent extends BusEventWithPayload<GrafanaTheme2> {
-  static type = 'theme-changed';
 }
 
 export class ZoomOutEvent extends BusEventWithPayload<number> {
@@ -170,6 +146,10 @@ export enum ShiftTimeEventPayload {
 }
 export class ShiftTimeEvent extends BusEventWithPayload<ShiftTimeEventPayload> {
   static type = 'shift-time';
+}
+
+export class AbsoluteTimeEvent extends BusEventBase {
+  static type = 'absolute-time';
 }
 
 export class RemovePanelEvent extends BusEventWithPayload<number> {
@@ -208,4 +188,12 @@ export class AnnotationQueryStarted extends BusEventWithPayload<AnnotationQuery>
 
 export class AnnotationQueryFinished extends BusEventWithPayload<AnnotationQuery> {
   static type = 'annotation-query-finished';
+}
+
+export class PanelEditEnteredEvent extends BusEventWithPayload<number> {
+  static type = 'panel-edit-started';
+}
+
+export class PanelEditExitedEvent extends BusEventWithPayload<number> {
+  static type = 'panel-edit-finished';
 }

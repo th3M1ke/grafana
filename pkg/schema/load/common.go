@@ -6,12 +6,12 @@ import (
 	"io/fs"
 	"path/filepath"
 
-	"cuelang.org/go/cue"
+	"cuelang.org/go/cue/cuecontext"
 	"cuelang.org/go/cue/load"
 	"github.com/grafana/grafana"
 )
 
-var rt = &cue.Runtime{}
+var ctx = cuecontext.New()
 
 // Families can have variants, where more typing information narrows the
 // possible values for certain keys in schemas. These are a meta-property
@@ -63,7 +63,6 @@ func toOverlay(prefix string, vfs fs.FS, overlay map[string]load.Source) error {
 	if !filepath.IsAbs(prefix) {
 		return fmt.Errorf("must provide absolute path prefix when generating cue overlay, got %q", prefix)
 	}
-
 	err := fs.WalkDir(vfs, ".", (func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err

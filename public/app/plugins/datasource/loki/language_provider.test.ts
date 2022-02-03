@@ -5,7 +5,8 @@ import { TypeaheadInput } from '@grafana/ui';
 
 import { makeMockLokiDatasource } from './mocks';
 import LokiDatasource from './datasource';
-import { DataQuery, DataSourceApi } from '@grafana/data';
+import { AbstractLabelOperator } from '@grafana/data';
+import { LokiQueryType } from './types';
 
 jest.mock('app/store/store', () => ({
   store: {
@@ -84,6 +85,21 @@ describe('Language completion provider', () => {
       expect(result.suggestions.length).toEqual(2);
       expect(result.suggestions[0].label).toEqual('Operators');
       expect(result.suggestions[1].label).toEqual('Parsers');
+    });
+  });
+
+  describe('fetchSeries', () => {
+    it('should use match[] parameter', () => {
+      const datasource = makeMockLokiDatasource({}, { '{foo="bar"}': [{ label1: 'label_val1' }] });
+      const languageProvider = new LanguageProvider(datasource);
+      const fetchSeries = languageProvider.fetchSeries;
+      const requestSpy = jest.spyOn(languageProvider, 'request');
+      fetchSeries('{job="grafana"}');
+      expect(requestSpy).toHaveBeenCalledWith('/loki/api/v1/series', {
+        end: 1560163909000,
+        'match[]': '{job="grafana"}',
+        start: 1560153109000,
+      });
     });
   });
 
@@ -230,40 +246,30 @@ describe('Request URL', () => {
 describe('Query imports', () => {
   const datasource = makeMockLokiDatasource({});
 
-  it('returns empty queries for unknown origin datasource', async () => {
+  it('returns empty queries', async () => {
     const instance = new LanguageProvider(datasource);
-    const result = await instance.importQueries([{ refId: 'bar', expr: 'foo' } as DataQuery], {
-      meta: { id: 'unknown' },
-    } as DataSourceApi);
-    expect(result).toEqual([{ refId: 'bar', expr: '' }]);
+    const result = await instance.importFromAbstractQuery({ refId: 'bar', labelMatchers: [] });
+    expect(result).toEqual({ refId: 'bar', expr: '', queryType: LokiQueryType.Range });
   });
 
-  describe('prometheus query imports', () => {
-    it('returns empty query from metric-only query', async () => {
+  describe('exporting to abstract query', () => {
+    it('exports labels', async () => {
       const instance = new LanguageProvider(datasource);
-      const result = await instance.importPrometheusQuery('foo');
-      expect(result).toEqual('');
-    });
-
-    it('returns empty query from selector query if label is not available', async () => {
-      const datasourceWithLabels = makeMockLokiDatasource({ other: [] });
-      const instance = new LanguageProvider(datasourceWithLabels);
-      const result = await instance.importPrometheusQuery('{foo="bar"}');
-      expect(result).toEqual('{}');
-    });
-
-    it('returns selector query from selector query with common labels', async () => {
-      const datasourceWithLabels = makeMockLokiDatasource({ foo: [] });
-      const instance = new LanguageProvider(datasourceWithLabels);
-      const result = await instance.importPrometheusQuery('metric{foo="bar",baz="42"}');
-      expect(result).toEqual('{foo="bar"}');
-    });
-
-    it('returns selector query from selector query with all labels if logging label list is empty', async () => {
-      const datasourceWithLabels = makeMockLokiDatasource({});
-      const instance = new LanguageProvider(datasourceWithLabels);
-      const result = await instance.importPrometheusQuery('metric{foo="bar",baz="42"}');
-      expect(result).toEqual('{baz="42",foo="bar"}');
+      const abstractQuery = instance.exportToAbstractQuery({
+        refId: 'bar',
+        expr: '{label1="value1", label2!="value2", label3=~"value3", label4!~"value4"}',
+        instant: true,
+        range: false,
+      });
+      expect(abstractQuery).toMatchObject({
+        refId: 'bar',
+        labelMatchers: [
+          { name: 'label1', operator: AbstractLabelOperator.Equal, value: 'value1' },
+          { name: 'label2', operator: AbstractLabelOperator.NotEqual, value: 'value2' },
+          { name: 'label3', operator: AbstractLabelOperator.EqualRegEx, value: 'value3' },
+          { name: 'label4', operator: AbstractLabelOperator.NotEqualRegEx, value: 'value4' },
+        ],
+      });
     });
   });
 });

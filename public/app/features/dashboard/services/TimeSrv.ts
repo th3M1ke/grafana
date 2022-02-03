@@ -14,7 +14,7 @@ import { getShiftedTimeRange, getZoomedTimeRange } from 'app/core/utils/timePick
 import { config } from 'app/core/config';
 import { getRefreshFromUrl } from '../utils/getRefreshFromUrl';
 import { locationService } from '@grafana/runtime';
-import { ShiftTimeEvent, ShiftTimeEventPayload, ZoomOutEvent } from '../../../types/events';
+import { AbsoluteTimeEvent, ShiftTimeEvent, ShiftTimeEventPayload, ZoomOutEvent } from '../../../types/events';
 import { contextSrv, ContextSrv } from 'app/core/services/context_srv';
 import appEvents from 'app/core/app_events';
 
@@ -41,6 +41,10 @@ export class TimeSrv {
       this.shiftTime(e.payload);
     });
 
+    appEvents.subscribe(AbsoluteTimeEvent, () => {
+      this.makeAbsoluteTime();
+    });
+
     document.addEventListener('visibilitychange', () => {
       if (this.autoRefreshBlocked && document.visibilityState === 'visible') {
         this.autoRefreshBlocked = false;
@@ -59,6 +63,22 @@ export class TimeSrv {
 
     // remember time at load so we can go back to it
     this.timeAtLoad = cloneDeep(this.time);
+
+    const range = rangeUtil.convertRawToRange(
+      this.time,
+      this.dashboard?.getTimezone(),
+      this.dashboard?.fiscalYearStartMonth
+    );
+
+    if (range.to.isBefore(range.from)) {
+      this.setTime(
+        {
+          from: range.raw.to,
+          to: range.raw.from,
+        },
+        false
+      );
+    }
 
     if (this.refresh) {
       this.setAutoRefresh(this.refresh);
@@ -199,21 +219,29 @@ export class TimeSrv {
 
     this.stopAutoRefresh();
 
-    if (interval) {
-      const validInterval = this.contextSrv.getValidInterval(interval);
-      const intervalMs = rangeUtil.intervalToMs(validInterval);
+    const currentUrlState = locationService.getSearchObject();
 
-      this.refreshTimer = setTimeout(() => {
-        this.startNextRefreshTimer(intervalMs);
-        this.refreshDashboard();
-      }, intervalMs);
+    if (!interval) {
+      // Clear URL state
+      if (currentUrlState.refresh) {
+        locationService.partial({ refresh: null }, true);
+      }
+
+      return;
     }
 
-    if (interval) {
-      const refresh = this.contextSrv.getValidInterval(interval);
+    const validInterval = this.contextSrv.getValidInterval(interval);
+    const intervalMs = rangeUtil.intervalToMs(validInterval);
+
+    this.refreshTimer = setTimeout(() => {
+      this.startNextRefreshTimer(intervalMs);
+      this.refreshDashboard();
+    }, intervalMs);
+
+    const refresh = this.contextSrv.getValidInterval(interval);
+
+    if (currentUrlState.refresh !== refresh) {
       locationService.partial({ refresh }, true);
-    } else {
-      locationService.partial({ refresh: null }, true);
     }
   }
 
@@ -263,15 +291,16 @@ export class TimeSrv {
     // update url
     if (fromRouteUpdate !== true) {
       const urlRange = this.timeRangeForUrl();
-      const urlParams = locationService.getSearch();
+      const urlParams = locationService.getSearchObject();
 
-      urlParams.set('from', urlRange.from.toString());
-      urlParams.set('to', urlRange.to.toString());
+      if (urlParams.from === urlRange.from.toString() && urlParams.to === urlRange.to.toString()) {
+        return;
+      }
 
-      locationService.push({
-        ...locationService.getLocation(),
-        search: urlParams.toString(),
-      });
+      urlParams.from = urlRange.from.toString();
+      urlParams.to = urlRange.to.toString();
+
+      locationService.partial(urlParams);
     }
 
     this.refreshDashboard();
@@ -300,8 +329,8 @@ export class TimeSrv {
     const timezone = this.dashboard ? this.dashboard.getTimezone() : undefined;
 
     return {
-      from: dateMath.parse(raw.from, false, timezone)!,
-      to: dateMath.parse(raw.to, true, timezone)!,
+      from: dateMath.parse(raw.from, false, timezone, this.dashboard?.fiscalYearStartMonth)!,
+      to: dateMath.parse(raw.to, true, timezone, this.dashboard?.fiscalYearStartMonth)!,
       raw: raw,
     };
   }
@@ -321,6 +350,33 @@ export class TimeSrv {
       from: toUtc(from),
       to: toUtc(to),
     });
+  }
+
+  makeAbsoluteTime() {
+    const params = locationService.getSearch();
+    if (params.get('left')) {
+      return; // explore handles this;
+    }
+
+    const { from, to } = this.timeRange();
+    this.setTime({ from, to });
+  }
+
+  // isRefreshOutsideThreshold function calculates the difference between last refresh and now
+  // if the difference is outside 5% of the current set time range then the function will return true
+  // if the difference is within 5% of the current set time range then the function will return false
+  // if the current time range is absolute (i.e. not using relative strings like now-5m) then the function will return false
+  isRefreshOutsideThreshold(lastRefresh: number, threshold = 0.05) {
+    const timeRange = this.timeRange();
+
+    if (dateMath.isMathString(timeRange.raw.from)) {
+      const totalRange = timeRange.to.diff(timeRange.from);
+      const msSinceLastRefresh = Date.now() - lastRefresh;
+      const msThreshold = totalRange * threshold;
+      return msSinceLastRefresh >= msThreshold;
+    }
+
+    return false;
   }
 }
 

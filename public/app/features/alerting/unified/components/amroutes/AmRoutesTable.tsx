@@ -1,17 +1,14 @@
-import React, { FC, useCallback, useEffect, useState } from 'react';
+import React, { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, HorizontalGroup, IconButton } from '@grafana/ui';
 import { AmRouteReceiver, FormAmRoute } from '../../types/amroutes';
-import {
-  addCustomExpandedContent,
-  collapseItem,
-  expandItem,
-  prepareItems,
-  removeCustomExpandedContent,
-} from '../../utils/dynamicTable';
+import { prepareItems } from '../../utils/dynamicTable';
 import { DynamicTable, DynamicTableColumnProps, DynamicTableItemProps } from '../DynamicTable';
 import { AmRoutesExpandedForm } from './AmRoutesExpandedForm';
 import { AmRoutesExpandedRead } from './AmRoutesExpandedRead';
 import { Matchers } from '../silences/Matchers';
+import { matcherFieldToMatcher, parseMatchers } from '../../utils/alertmanager';
+import { intersectionWith, isEqual } from 'lodash';
+import { EmptyArea } from '../EmptyArea';
 
 export interface AmRoutesTableProps {
   isAddMode: boolean;
@@ -19,55 +16,55 @@ export interface AmRoutesTableProps {
   onCancelAdd: () => void;
   receivers: AmRouteReceiver[];
   routes: FormAmRoute[];
+  filters?: { queryString?: string; contactPoint?: string };
+  readOnly?: boolean;
 }
 
 type RouteTableColumnProps = DynamicTableColumnProps<FormAmRoute>;
 type RouteTableItemProps = DynamicTableItemProps<FormAmRoute>;
 
-export const AmRoutesTable: FC<AmRoutesTableProps> = ({ isAddMode, onCancelAdd, onChange, receivers, routes }) => {
-  const [items, setItems] = useState<RouteTableItemProps[]>([]);
+export const getFilteredRoutes = (routes: FormAmRoute[], labelMatcherQuery?: string, contactPointQuery?: string) => {
+  const matchers = parseMatchers(labelMatcherQuery ?? '');
 
-  const getRenderEditExpandedContent = useCallback(
-    // eslint-disable-next-line react/display-name
-    (item: RouteTableItemProps, index: number) => () => (
-      <AmRoutesExpandedForm
-        onCancel={() => {
-          setItems((items) => {
-            let newItems = collapseItem(items, item.id);
-            newItems = removeCustomExpandedContent(newItems, item.id);
+  let filteredRoutes = routes;
 
-            return newItems;
-          });
+  if (matchers.length) {
+    filteredRoutes = routes.filter((route) => {
+      const routeMatchers = route.object_matchers.map(matcherFieldToMatcher);
+      return intersectionWith(routeMatchers, matchers, isEqual).length > 0;
+    });
+  }
 
-          if (isAddMode) {
-            onCancelAdd();
-          }
-        }}
-        onSave={(data) => {
-          const newRoutes = [...routes];
+  if (contactPointQuery && contactPointQuery.length > 0) {
+    filteredRoutes = filteredRoutes.filter((route) =>
+      route.receiver.toLowerCase().includes(contactPointQuery.toLowerCase())
+    );
+  }
 
-          newRoutes[index] = {
-            ...newRoutes[index],
-            ...data,
-          };
+  return filteredRoutes;
+};
 
-          setItems((items) => collapseItem(items, item.id));
+export const AmRoutesTable: FC<AmRoutesTableProps> = ({
+  isAddMode,
+  onCancelAdd,
+  onChange,
+  receivers,
+  routes,
+  filters,
+  readOnly = false,
+}) => {
+  const [editMode, setEditMode] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | number>();
 
-          onChange(newRoutes);
-        }}
-        receivers={receivers}
-        routes={item.data}
-      />
-    ),
-    [isAddMode, onCancelAdd, onChange, receivers, routes]
-  );
+  const expandItem = useCallback((item: RouteTableItemProps) => setExpandedId(item.id), []);
+  const collapseItem = useCallback(() => setExpandedId(undefined), []);
 
   const cols: RouteTableColumnProps[] = [
     {
       id: 'matchingCriteria',
       label: 'Matching labels',
       // eslint-disable-next-line react/display-name
-      renderCell: (item) => <Matchers matchers={item.data.matchers} />,
+      renderCell: (item) => <Matchers matchers={item.data.object_matchers.map(matcherFieldToMatcher)} />,
       size: 10,
     },
     {
@@ -83,89 +80,135 @@ export const AmRoutesTable: FC<AmRoutesTableProps> = ({ isAddMode, onCancelAdd, 
       size: 5,
     },
     {
-      id: 'actions',
-      label: 'Actions',
-      // eslint-disable-next-line react/display-name
-      renderCell: (item, index) => {
-        if (item.renderExpandedContent) {
-          return null;
-        }
-
-        const expandWithCustomContent = () =>
-          setItems((items) => {
-            let newItems = expandItem(items, item.id);
-            newItems = addCustomExpandedContent(newItems, item.id, getRenderEditExpandedContent(item, index));
-
-            return newItems;
-          });
-
-        return (
-          <HorizontalGroup>
-            <Button icon="pen" onClick={expandWithCustomContent} size="sm" type="button" variant="secondary">
-              Edit
-            </Button>
-            <IconButton
-              name="trash-alt"
-              onClick={() => {
-                const newRoutes = [...routes];
-
-                newRoutes.splice(index, 1);
-
-                onChange(newRoutes);
-              }}
-              type="button"
-            />
-          </HorizontalGroup>
-        );
-      },
-      size: '100px',
+      id: 'muteTimings',
+      label: 'Mute timings',
+      renderCell: (item) => item.data.muteTimeIntervals.join(', ') || '-',
+      size: 5,
     },
+    ...(readOnly
+      ? []
+      : [
+          {
+            id: 'actions',
+            label: 'Actions',
+            // eslint-disable-next-line react/display-name
+            renderCell: (item, index) => {
+              if (item.renderExpandedContent) {
+                return null;
+              }
+
+              const expandWithCustomContent = () => {
+                expandItem(item);
+                setEditMode(true);
+              };
+
+              return (
+                <HorizontalGroup>
+                  <Button
+                    aria-label="Edit route"
+                    icon="pen"
+                    onClick={expandWithCustomContent}
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Edit
+                  </Button>
+                  <IconButton
+                    aria-label="Delete route"
+                    name="trash-alt"
+                    onClick={() => {
+                      const newRoutes = [...routes];
+
+                      newRoutes.splice(index, 1);
+
+                      onChange(newRoutes);
+                    }}
+                    type="button"
+                  />
+                </HorizontalGroup>
+              );
+            },
+            size: '100px',
+          } as RouteTableColumnProps,
+        ]),
   ];
 
+  const filteredRoutes = useMemo(() => getFilteredRoutes(routes, filters?.queryString, filters?.contactPoint), [
+    routes,
+    filters,
+  ]);
+
+  const dynamicTableRoutes = useMemo(() => prepareItems(isAddMode ? routes : filteredRoutes), [
+    isAddMode,
+    routes,
+    filteredRoutes,
+  ]);
+
+  // expand the last item when adding
   useEffect(() => {
-    const items = prepareItems(routes).map((item, index, arr) => {
-      if (isAddMode && index === arr.length - 1) {
-        return {
-          ...item,
-          isExpanded: true,
-          renderExpandedContent: getRenderEditExpandedContent(item, index),
-        };
-      }
+    if (isAddMode && dynamicTableRoutes.length) {
+      setExpandedId(dynamicTableRoutes[dynamicTableRoutes.length - 1].id);
+    }
+  }, [isAddMode, dynamicTableRoutes]);
 
-      return {
-        ...item,
-        isExpanded: false,
-        renderExpandedContent: undefined,
-      };
-    });
-
-    setItems(items);
-  }, [routes, getRenderEditExpandedContent, isAddMode]);
+  if (routes.length > 0 && filteredRoutes.length === 0) {
+    return (
+      <EmptyArea>
+        <p>No policies found</p>
+      </EmptyArea>
+    );
+  }
 
   return (
     <DynamicTable
       cols={cols}
       isExpandable={true}
-      items={items}
-      onCollapse={(item: RouteTableItemProps) => setItems((items) => collapseItem(items, item.id))}
-      onExpand={(item: RouteTableItemProps) => setItems((items) => expandItem(items, item.id))}
+      items={dynamicTableRoutes}
       testIdGenerator={() => 'am-routes-row'}
-      renderExpandedContent={(item: RouteTableItemProps, index) => (
-        <AmRoutesExpandedRead
-          onChange={(data) => {
-            const newRoutes = [...routes];
+      onCollapse={collapseItem}
+      onExpand={expandItem}
+      isExpanded={(item) => expandedId === item.id}
+      renderExpandedContent={(item: RouteTableItemProps, index) =>
+        isAddMode || editMode ? (
+          <AmRoutesExpandedForm
+            onCancel={() => {
+              if (isAddMode) {
+                onCancelAdd();
+              }
+              setEditMode(false);
+            }}
+            onSave={(data) => {
+              const newRoutes = [...routes];
 
-            newRoutes[index] = {
-              ...item.data,
-              ...data,
-            };
+              newRoutes[index] = {
+                ...newRoutes[index],
+                ...data,
+              };
+              setEditMode(false);
+              onChange(newRoutes);
+            }}
+            receivers={receivers}
+            routes={item.data}
+          />
+        ) : (
+          <AmRoutesExpandedRead
+            onChange={(data) => {
+              const newRoutes = [...routes];
 
-            onChange(newRoutes);
-          }}
-          receivers={receivers}
-          routes={item.data}
-        />
-      )}
+              newRoutes[index] = {
+                ...item.data,
+                ...data,
+              };
+
+              onChange(newRoutes);
+            }}
+            receivers={receivers}
+            routes={item.data}
+            readOnly={readOnly}
+          />
+        )
+      }
     />
   );
 };

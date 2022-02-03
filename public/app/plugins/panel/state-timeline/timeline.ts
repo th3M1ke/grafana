@@ -4,8 +4,8 @@ import { pointWithin, Quadtree, Rect } from 'app/plugins/panel/barchart/quadtree
 import { distribute, SPACE_BETWEEN } from 'app/plugins/panel/barchart/distribute';
 import { TimelineFieldConfig, TimelineMode, TimelineValueAlignment } from './types';
 import { GrafanaTheme2, TimeRange } from '@grafana/data';
-import { BarValueVisibility } from '@grafana/ui';
-import tinycolor from 'tinycolor2';
+import { VisibilityMode } from '@grafana/schema';
+import { alpha } from '@grafana/data/src/themes/colorManipulator';
 
 const { round, min, ceil } = Math;
 
@@ -40,7 +40,7 @@ export interface TimelineCoreOptions {
   rowHeight: number;
   colWidth?: number;
   theme: GrafanaTheme2;
-  showValue: BarValueVisibility;
+  showValue: VisibilityMode;
   isDiscrete: (seriesIdx: number) => boolean;
   getValueColor: (seriesIdx: number, value: any) => string;
   label: (seriesIdx: number) => string;
@@ -288,7 +288,7 @@ export function getConfig(opts: TimelineCoreOptions) {
   };
 
   const drawPoints: Series.Points.Show =
-    formatValue == null || showValue === BarValueVisibility.Never
+    formatValue == null || showValue === VisibilityMode.Never
       ? false
       : (u, sidx, i0, i1) => {
           u.ctx.save();
@@ -312,7 +312,7 @@ export function getConfig(opts: TimelineCoreOptions) {
                   const boxRect = boxRectsBySeries[sidx - 1][ix];
 
                   // Todo refine this to better know when to not render text (when values do not fit)
-                  if (!boxRect || (showValue === BarValueVisibility.Auto && boxRect.w < 25)) {
+                  if (!boxRect || (showValue === VisibilityMode.Auto && boxRect.w < 25)) {
                     continue;
                   }
 
@@ -371,10 +371,10 @@ export function getConfig(opts: TimelineCoreOptions) {
 
     if (o) {
       h.style.display = '';
-      h.style.left = round(o!.x / pxRatio) + 'px';
-      h.style.top = round(o!.y / pxRatio) + 'px';
-      h.style.width = round(o!.w / pxRatio) + 'px';
-      h.style.height = round(o!.h / pxRatio) + 'px';
+      h.style.left = round(o.x / pxRatio) + 'px';
+      h.style.top = round(o.y / pxRatio) + 'px';
+      h.style.width = round(o.w / pxRatio) + 'px';
+      h.style.height = round(o.h / pxRatio) + 'px';
     } else {
       h.style.display = 'none';
     }
@@ -382,13 +382,13 @@ export function getConfig(opts: TimelineCoreOptions) {
     hovered[i] = o;
   }
 
-  let hoveredAtCursor: Rect | null = null;
+  let hoveredAtCursor: Rect | undefined;
 
   function hoverMulti(cx: number, cy: number) {
-    let foundAtCursor: Rect | null = null;
+    let foundAtCursor: Rect | undefined;
 
     for (let i = 0; i < numSeries; i++) {
-      let found: Rect | null = null;
+      let found: Rect | undefined;
 
       if (cx >= 0) {
         let cy2 = yMids[i];
@@ -416,16 +416,16 @@ export function getConfig(opts: TimelineCoreOptions) {
     if (foundAtCursor) {
       if (foundAtCursor !== hoveredAtCursor) {
         hoveredAtCursor = foundAtCursor;
-        onHover(foundAtCursor!.sidx, foundAtCursor!.didx, foundAtCursor);
+        onHover(foundAtCursor.sidx, foundAtCursor.didx, foundAtCursor);
       }
     } else if (hoveredAtCursor) {
-      hoveredAtCursor = null;
+      hoveredAtCursor = undefined;
       onLeave();
     }
   }
 
   function hoverOne(cx: number, cy: number) {
-    let foundAtCursor: Rect | null = null;
+    let foundAtCursor: Rect | undefined;
 
     qt.get(cx, cy, 1, 1, (o) => {
       if (pointWithin(cx, cy, o.x, o.y, o.x + o.w, o.y + o.h)) {
@@ -438,11 +438,11 @@ export function getConfig(opts: TimelineCoreOptions) {
 
       if (foundAtCursor !== hoveredAtCursor) {
         hoveredAtCursor = foundAtCursor;
-        onHover(foundAtCursor!.sidx, foundAtCursor!.didx, foundAtCursor);
+        onHover(foundAtCursor.sidx, foundAtCursor.didx, foundAtCursor);
       }
     } else if (hoveredAtCursor) {
       setHoverMark(0, null);
-      hoveredAtCursor = null;
+      hoveredAtCursor = undefined;
       onLeave();
     }
   }
@@ -450,8 +450,8 @@ export function getConfig(opts: TimelineCoreOptions) {
   const doHover = mode === TimelineMode.Changes ? hoverMulti : hoverOne;
 
   const setCursor = (u: uPlot) => {
-    let cx = round(u.cursor!.left! * pxRatio);
-    let cy = round(u.cursor!.top! * pxRatio);
+    let cx = round(u.cursor.left! * pxRatio);
+    let cy = round(u.cursor.top! * pxRatio);
 
     // if quadtree is empty, fill it
     if (!qt.o.length && qt.q == null) {
@@ -547,6 +547,12 @@ export function getConfig(opts: TimelineCoreOptions) {
 }
 
 function getFillColor(fieldConfig: TimelineFieldConfig, color: string) {
+  // if #rgba with pre-existing alpha. ignore fieldConfig.fillOpacity
+  // e.g. thresholds with opacity
+  if (color[0] === '#' && color.length === 9) {
+    return color;
+  }
+
   const opacityPercent = (fieldConfig.fillOpacity ?? 100) / 100;
-  return tinycolor(color).setAlpha(opacityPercent).toString();
+  return alpha(color, opacityPercent);
 }
