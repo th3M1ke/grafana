@@ -4,7 +4,7 @@ import { isEqual } from 'lodash';
 import { css, cx } from '@emotion/css';
 import { InlineFormLabel, RadioButtonGroup } from '@grafana/ui';
 import { PromQuery } from '../types';
-import { PromExemplarField } from './PromExemplarField';
+// import { PromExemplarField } from './PromExemplarField'; // LOGZ.IO GRAFANA CHANGE :: Disable exemplars
 import { PrometheusDatasource } from '../datasource';
 
 export interface PromExploreExtraFieldProps {
@@ -115,7 +115,7 @@ export const PromExploreExtraField: React.FC<PromExploreExtraFieldProps> = memo(
           />
         </div>
 
-        <PromExemplarField onChange={onExemplarChange} datasource={datasource} query={query} />
+        {/* <PromExemplarField onChange={onExemplarChange} datasource={datasource} query={query} />  LOGZ.IO GRAFANA CHANGE :: Disable exemplars*/}
       </div>
     );
   }

@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/grafana/grafana/pkg/plugins" // LOGZ.IO GRAFANA CHANGE :: DEV-17927 - Add now to time range.
 	"github.com/vectordotdev/go-datemath"
 )
 
@@ -12,6 +13,17 @@ type DataTimeRange struct {
 	To   string
 	Now  time.Time
 }
+
+// LOGZ.IO GRAFANA CHANGE :: DEV-17927 - Add now to time range.
+func CustomNewTimeRange(from, to string, now time.Time) plugins.DataTimeRange {
+	return plugins.DataTimeRange{
+		From: from,
+		To:   to,
+		Now:  now,
+	}
+}
+
+// LOGZ.IO GRAFANA CHANGE :: end
 
 func NewDataTimeRange(from, to string) DataTimeRange {
 	return DataTimeRange{

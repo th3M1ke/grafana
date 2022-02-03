@@ -1,4 +1,4 @@
-FROM node:16-alpine3.15 as js-builder
+FROM registry.internal.logz.io:5000/node:16-alpine3.15 as js-builder
 
 ENV NODE_OPTIONS=--max_old_space_size=8000
 
@@ -20,7 +20,7 @@ COPY emails emails
 ENV NODE_ENV production
 RUN yarn build
 
-FROM golang:1.17.6-alpine3.15 as go-builder
+FROM registry.internal.logz.io:5000/logzio-golang:1.17.6-alpine3.15 as go-builder
 
 RUN apk add --no-cache gcc g++ make
 
@@ -39,7 +39,7 @@ RUN go mod verify
 RUN make build-go
 
 # Final stage
-FROM alpine:3.15
+FROM registry.internal.logz.io:5000/logzio-alpine:3.15
 
 LABEL maintainer="Grafana team <hello@grafana.com>"
 
@@ -86,6 +86,11 @@ RUN export GF_GID_NAME=$(getent group $GF_GID | cut -d':' -f1) && \
 COPY --from=go-builder /grafana/bin/*/grafana-server /grafana/bin/*/grafana-cli ./bin/
 COPY --from=js-builder /grafana/public ./public
 COPY --from=js-builder /grafana/tools ./tools
+
+# LOGZ.IO GRAFANA CHANGE :: Copy custom.ini
+RUN cp "$GF_PATHS_HOME/conf/custom.ini" "$GF_PATHS_CONFIG"
+# LOGZ.IO GRAFANA CHANGE :: Preinstall plugins
+COPY ./data/plugins "$GF_PATHS_PLUGINS"
 
 EXPOSE 3000
 

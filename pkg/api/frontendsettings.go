@@ -11,6 +11,7 @@ import (
 	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/tsdb/grafanads"
 	"github.com/grafana/grafana/pkg/util"
+	"github.com/prometheus/common/log" // LOGZ.IO GRAFANA CHANGE
 )
 
 func (hs *HTTPServer) getFSDataSources(c *models.ReqContext, enabledPlugins EnabledPlugins) (map[string]plugins.DataSourceDTO, error) {
@@ -106,6 +107,9 @@ func (hs *HTTPServer) getFSDataSources(c *models.ReqContext, enabledPlugins Enab
 
 		dataSources[ds.Name] = dsDTO
 	}
+
+	// LOGZ.IO GRAFANA CHANGE
+	log.Debugf("Org %d - datasource count : %d", c.OrgId, len(dataSources))
 
 	// add data sources that are built in (meaning they are not added via data sources page, nor have any entry in
 	// the datasource table)
