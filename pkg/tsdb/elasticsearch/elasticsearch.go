@@ -14,6 +14,7 @@ import (
 	"github.com/grafana/grafana/pkg/infra/log"
 	es "github.com/grafana/grafana/pkg/tsdb/elasticsearch/client"
 	"github.com/grafana/grafana/pkg/tsdb/intervalv2"
+	"github.com/grafana/grafana/pkg/tsdb/legacydata"
 )
 
 var eslog = log.New("tsdb.elasticsearch")
@@ -34,7 +35,7 @@ func ProvideService(httpClientProvider httpclient.Provider) *Service {
 	}
 }
 
-func (s *Service) QueryData(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
+func (s *Service) QueryData(ctx context.Context, req *backend.QueryDataRequest, tsdbQuery legacydata.DataQuery) (*backend.QueryDataResponse, error) {
 	if len(req.Queries) == 0 {
 		return &backend.QueryDataResponse{}, fmt.Errorf("query contains no queries")
 	}

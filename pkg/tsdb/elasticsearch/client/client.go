@@ -22,6 +22,7 @@ import (
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/models"
 	"github.com/grafana/grafana/pkg/tsdb/intervalv2"
+	"github.com/grafana/grafana/pkg/tsdb/legacydata"
 
 	"golang.org/x/net/context/ctxhttp"
 )
@@ -61,7 +62,7 @@ type Client interface {
 }
 
 // NewClient creates a new elasticsearch client
-var NewClient = func(ctx context.Context, httpClientProvider httpclient.Provider, ds *DatasourceInfo, timeRange backend.TimeRange, tsdbQuery *plugins.DataQuery) (Client, error) { // LOGZ.IO GRAFANA CHANGE :: (ALERTS) DEV-16492 Support external alert evaluation
+var NewClient = func(ctx context.Context, httpClientProvider httpclient.Provider, ds *DatasourceInfo, timeRange backend.TimeRange, tsdbQuery *legacydata.DataQuery) (Client, error) { // LOGZ.IO GRAFANA CHANGE :: (ALERTS) DEV-16492 Support external alert evaluation
 	ip, err := newIndexPattern(ds.Interval, ds.Database)
 	if err != nil {
 		return nil, err

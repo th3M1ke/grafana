@@ -56,7 +56,7 @@ type AlertQuery struct {
 
 // Eval evaluates the `QueryCondition`.
 func (c *QueryCondition) Eval(context *alerting.EvalContext, time time.Time, requestHandler legacydata.RequestHandler) (*alerting.ConditionResult, error) { // LOGZ.IO GRAFANA CHANGE :: DEV-17927 - Add current time to time range
-	timeRange := legacydata.NewDataTimeRange(c.Query.From, c.Query.To, time) // LOGZ.IO GRAFANA CHANGE :: DEV-17927 - Add current time to time range
+	timeRange := legacydata.CustomNewTimeRange(c.Query.From, c.Query.To, time) // LOGZ.IO GRAFANA CHANGE :: DEV-17927 - Add current time to time range
 
 	seriesList, err := c.executeQuery(context, timeRange, requestHandler)
 	if err != nil {
@@ -181,7 +181,7 @@ func (c *QueryCondition) executeQuery(context *alerting.EvalContext, timeRange l
 	if err != nil {
 		return nil, fmt.Errorf("interval calculation failed: %w", err)
 	}
-	req.LogzIoHeaders = context.Rule.LogzIoHeaders // LOGZ.IO GRAFANA CHANGE :: (ALERTS) DEV-16492 Support external alert evaluation
+	// req.LogzIoHeaders = context.Rule.LogzIoHeaders // LOGZ.IO GRAFANA CHANGE :: (ALERTS) DEV-16492 Support external alert evaluation
 	result := make(legacydata.DataTimeSeriesSlice, 0)
 
 	if context.IsDebug {

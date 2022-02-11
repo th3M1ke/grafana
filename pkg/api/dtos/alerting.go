@@ -2,7 +2,6 @@ package dtos
 
 import (
 	"fmt"
-	"github.com/grafana/grafana/pkg/components/securejsondata" // LOGZ.IO GRAFANA CHANGE
 	"time"
 
 	"github.com/grafana/grafana/pkg/components/null"
@@ -139,8 +138,8 @@ type PauseAllAlertsCommand struct {
 
 // LOGZ.IO GRAFANA CHANGE :: DEV-17927 - Check alerts dto
 type EvaluateAlertRequestCommand struct {
-	EvalTime          time.Time              `json:"evalTime"`
-	DataSourceUrl     string                 `json:"dataSourceUrl"`
+	EvalTime      time.Time `json:"evalTime"`
+	DataSourceUrl string    `json:"dataSourceUrl"`
 	Alert         struct {
 		ID             int64                 `json:"id"`
 		Version        int64                 `json:"version"`
@@ -163,30 +162,30 @@ type EvaluateAlertRequestCommand struct {
 		Updated        time.Time             `json:"updated"`
 		For            time.Duration         `json:"for"`
 	} `json:"alert"`
-	CustomDataSources  []struct {
-		Id                int64                         `json:"id"`
-		OrgId             int64                         `json:"orgId"`
-		Version           int                           `json:"version"`
+	CustomDataSources []struct {
+		Id      int64 `json:"id"`
+		OrgId   int64 `json:"orgId"`
+		Version int   `json:"version"`
 
-		Name              string                        `json:"name"`
-		Type              string                        `json:"type"`
-		Access            string                        `json:"access"`
-		Url               string                        `json:"url"`
-		Password          string                        `json:"password"`
-		User              string                        `json:"user"`
-		Database          string                        `json:"database"`
-		BasicAuth         bool                          `json:"basicAuth"`
-		BasicAuthUser     string                        `json:"basicAuthUser"`
-		BasicAuthPassword string                        `json:"basicAuthPassword"`
-		WithCredentials   bool                          `json:"withCredentials"`
-		IsDefault         bool                          `json:"isDefault"`
-		JsonData          *simplejson.Json              `json:"jsonData"`
-		SecureJsonData    securejsondata.SecureJsonData `json:"secureJsonData"`
-		ReadOnly          bool                          `json:"readOnly"`
-		Uid               string                        `json:"uid"`
+		Name              string            `json:"name"`
+		Type              string            `json:"type"`
+		Access            string            `json:"access"`
+		Url               string            `json:"url"`
+		Password          string            `json:"password"`
+		User              string            `json:"user"`
+		Database          string            `json:"database"`
+		BasicAuth         bool              `json:"basicAuth"`
+		BasicAuthUser     string            `json:"basicAuthUser"`
+		BasicAuthPassword string            `json:"basicAuthPassword"`
+		WithCredentials   bool              `json:"withCredentials"`
+		IsDefault         bool              `json:"isDefault"`
+		JsonData          *simplejson.Json  `json:"jsonData"`
+		SecureJsonData    map[string][]byte `json:"secureJsonData"`
+		ReadOnly          bool              `json:"readOnly"`
+		Uid               string            `json:"uid"`
 
-		Created time.Time                               `json:"created"`
-		Updated time.Time                               `json:"updated"`
+		Created time.Time `json:"created"`
+		Updated time.Time `json:"updated"`
 	} `json:"customDataSources"`
 }
 
@@ -194,4 +193,5 @@ type EvaluateAlertByIdCommand struct {
 	EvalTime time.Time `json:"evalTime"`
 	AlertId  int64     `json:"alertId"`
 }
+
 // LOGZ.IO GRAFANA CHANGE :: end

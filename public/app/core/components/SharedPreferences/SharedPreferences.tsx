@@ -98,7 +98,7 @@ export class SharedPreferences extends PureComponent<Props, State> {
   }
 
   onSubmitForm = async () => {
-    const { homeDashboardId, theme, timezone, weekStart } = this.state;
+    const { homeDashboardId, theme, timezone /*weekStart*/ } = this.state; // LOGZ.IO CHANGE
     // LOGZ.IO GRAFANA CHANGE :: DEV-20609 Home dashboard
     await backendSrv.put(`/api/${this.props.resourceUri.toLowerCase()}/preferences`, {
       homeDashboardId,

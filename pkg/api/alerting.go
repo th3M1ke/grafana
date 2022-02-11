@@ -183,7 +183,12 @@ func (hs *HTTPServer) AlertTest(c *models.ReqContext) response.Response {
 
 // LOGZ.IO GRAFANA CHANGE :: DEV-17927 - Custom Alert payload check end-points
 // POST /api/alerts/evaluate-alert
-func EvaluateAlert(c *models.ReqContext, dto dtos.EvaluateAlertRequestCommand) response.Response {
+func (hs *HTTPServer) EvaluateAlert(c *models.ReqContext) response.Response {
+	dto := dtos.EvaluateAlertRequestCommand{}
+	if err := web.Bind(c.Req, &dto); err != nil {
+		return response.Error(http.StatusBadRequest, "bad request data", err)
+	}
+
 	customDataSources := make([]*models.DataSource, 0)
 
 	for _, ds := range dto.CustomDataSources {
@@ -243,7 +248,7 @@ func EvaluateAlert(c *models.ReqContext, dto dtos.EvaluateAlertRequestCommand) r
 		CustomDataSources: customDataSources,
 	}
 
-	if err := bus.Dispatch(&alertCheckCommand); err != nil {
+	if err := bus.Dispatch(c.Req.Context(), &alertCheckCommand); err != nil {
 		return response.Error(500, "Failed to check alert", err)
 	}
 
@@ -277,14 +282,18 @@ func EvaluateAlert(c *models.ReqContext, dto dtos.EvaluateAlertRequestCommand) r
 
 // LOGZ.IO GRAFANA CHANGE :: DEV-17927 - new endpoint
 // POST /api/alerts/evaluate-alert-by-id
-func EvaluateAlertById(c *models.ReqContext, dto dtos.EvaluateAlertByIdCommand) response.Response {
+func (hs *HTTPServer) EvaluateAlertById(c *models.ReqContext) response.Response {
+	dto := dtos.EvaluateAlertByIdCommand{}
+	if err := web.Bind(c.Req, &dto); err != nil {
+		return response.Error(http.StatusBadRequest, "bad request data", err)
+	}
 	evaluateAlertByIdCommand := alerting.EvaluateAlertByIdCommand{
 		AlertId:       dto.AlertId,
 		EvalTime:      dto.EvalTime,
 		LogzIoHeaders: &models.LogzIoHeaders{RequestHeaders: c.Req.Header},
 	}
 
-	if err := bus.Dispatch(&evaluateAlertByIdCommand); err != nil {
+	if err := bus.Dispatch(c.Req.Context(), &evaluateAlertByIdCommand); err != nil {
 		return response.Error(500, "Failed to check alert", err)
 	}
 

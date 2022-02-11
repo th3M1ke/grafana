@@ -62,6 +62,11 @@ export class AlertTabCtrl {
     this.panelCtrl._enableAlert = this.enable;
     this.alertingMinIntervalSecs = config.alertingMinInterval;
     this.alertingMinInterval = rangeUtil.secondsToHms(config.alertingMinInterval);
+    // LOGZ.IO GRAFANA CHANGE :: (ALERTS) Email validation
+    this.isEmailValid = true;
+    this.alertEmailNotifications = [];
+    this.emailInEdit = '';
+    // LOGZ.IO GRAFANA CHANGE :: end
   }
 
   $onInit() {
@@ -82,11 +87,6 @@ export class AlertTabCtrl {
     this.notifications = [];
     this.alertNotifications = [];
     this.alertHistory = [];
-    // LOGZ.IO GRAFANA CHANGE :: (ALERTS) Email validation
-    this.isEmailValid = true;
-    this.alertEmailNotifications = [];
-    this.emailInEdit = '';
-    // LOGZ.IO GRAFANA CHANGE :: end
 
     return promiseToDigest(this.$scope)(
       getBackendSrv()

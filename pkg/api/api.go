@@ -4,8 +4,7 @@ package api
 import (
 	"time"
 
-	"github.com/grafana/grafana/pkg/api/avatar"
-	"github.com/grafana/grafana/pkg/api/dtos" // LOGZ.IO GRAFANA CHANGE :: DEV-17927 - alerts endpoint
+	"github.com/grafana/grafana/pkg/api/avatar" // LOGZ.IO GRAFANA CHANGE :: DEV-17927 - alerts endpoint
 	"github.com/grafana/grafana/pkg/api/frontendlogging"
 	"github.com/grafana/grafana/pkg/api/routing"
 	"github.com/grafana/grafana/pkg/infra/log"
@@ -139,8 +138,8 @@ func (hs *HTTPServer) registerRoutes() {
 	r.Get("/api/login/ping", quota("session"), routing.Wrap(hs.LoginAPIPing))
 
 	// evaluate-alert skip LOGIN check save db call
-	r.Post("/api/alerts/evaluate-alert", bind(dtos.EvaluateAlertRequestCommand{}), routing.Wrap(EvaluateAlert))        // LOGZ.IO GRAFANA CHANGE :: DEV-17927 - alerts endpoint
-	r.Post("/api/alerts/evaluate-alert-by-id", bind(dtos.EvaluateAlertByIdCommand{}), routing.Wrap(EvaluateAlertById)) // LOGZ.IO GRAFANA CHANGE :: DEV-17927 - alerts endpoint
+	r.Post("/api/alerts/evaluate-alert", routing.Wrap(hs.EvaluateAlert))           // LOGZ.IO GRAFANA CHANGE :: DEV-17927 - alerts endpoint
+	r.Post("/api/alerts/evaluate-alert-by-id", routing.Wrap(hs.EvaluateAlertById)) // LOGZ.IO GRAFANA CHANGE :: DEV-17927 - alerts endpoint
 
 	// expose plugin file system assets
 	r.Get("/public/plugins/:pluginId/*", hs.getPluginAssets)
@@ -387,7 +386,7 @@ func (hs *HTTPServer) registerRoutes() {
 		apiRoute.Post("/ds/query", authorize(reqSignedIn, ac.EvalPermission(ActionDatasourcesQuery)), routing.Wrap(hs.QueryMetricsV2))
 
 		apiRoute.Group("/alerts", func(alertsRoute routing.RouteRegister) {
-			alertsRoute.Post("/evaluate-alert", bind(dtos.EvaluateAlertRequestCommand{}), routing.Wrap(EvaluateAlert)) // LOGZ.IO GRAFANA CHANGE :: DEV-17927 - alerts endpoint
+			alertsRoute.Post("/evaluate-alert", routing.Wrap(hs.EvaluateAlert)) // LOGZ.IO GRAFANA CHANGE :: DEV-17927 - alerts endpoint
 			alertsRoute.Post("/test", routing.Wrap(hs.AlertTest))
 			alertsRoute.Post("/:alertId/pause", reqEditorRole, routing.Wrap(PauseAlert))
 			alertsRoute.Get("/:alertId", ValidateOrgAlert, routing.Wrap(GetAlert))

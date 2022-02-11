@@ -4,33 +4,35 @@ package alerting
 import (
 	"context"
 	"errors"
-	"github.com/grafana/grafana/pkg/plugins"
+	"fmt"
 	"math"
 	"time"
 
 	"github.com/grafana/grafana/pkg/infra/log"
-	"github.com/grafana/grafana/pkg/registry"
+	"github.com/grafana/grafana/pkg/infra/tracing"
+	"github.com/grafana/grafana/pkg/infra/usagestats"
+	"github.com/grafana/grafana/pkg/services/encryption"
 	"github.com/grafana/grafana/pkg/services/rendering"
 	"github.com/grafana/grafana/pkg/setting"
-	"github.com/opentracing/opentracing-go"
-	"github.com/opentracing/opentracing-go/ext"
-	tlog "github.com/opentracing/opentracing-go/log"
+	"github.com/grafana/grafana/pkg/tsdb/legacydata"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/grafana/grafana/pkg/bus"
 	"github.com/grafana/grafana/pkg/models"
 )
 
 type AlertEvaluatorEngine struct {
-	RenderService rendering.Service `inject:""`
-	Bus           bus.Bus           `inject:""`
-	RequestValidator models.PluginRequestValidator `inject:""`
-	DataService      plugins.DataRequestHandler    `inject:""`
+	RenderService    rendering.Service
+	Bus              bus.Bus
+	RequestValidator models.PluginRequestValidator
+	DataService      legacydata.RequestHandler
 
 	evalHandler   evalHandler
 	ruleReader    ruleReader
 	resultHandler resultHandler
 
-	log log.Logger
+	log    log.Logger
+	tracer tracing.Tracer
 }
 
 type EvaluateAlertCommand struct {
@@ -51,43 +53,44 @@ type EvaluateAlertByIdCommand struct {
 	Result *EvalContext
 }
 
-func init() {
-	registry.RegisterService(&AlertEvaluatorEngine{}) // LOGZ.IO GRAFANA CHANGE :: DEV-17927 - Register the new alert check struct
-}
-
-func (e *AlertEvaluatorEngine) Init() error {
+func ProvideAlertEvaluatorEngine(renderer rendering.Service, bus bus.Bus, requestValidator models.PluginRequestValidator,
+	dataService legacydata.RequestHandler, usageStatsService usagestats.Service, encryptionService encryption.Internal,
+	cfg *setting.Cfg, tracer tracing.Tracer) *AlertEvaluatorEngine {
+	e := &AlertEvaluatorEngine{}
 	e.evalHandler = NewEvalHandler(e.DataService)
 	e.ruleReader = newRuleReader()
 	e.log = log.New("check-alerting.engine")
-	e.resultHandler = newResultHandler(e.RenderService)
+	e.resultHandler = newResultHandler(e.RenderService, encryptionService.GetDecryptedValue)
+	e.Bus = bus
 	e.Bus.AddHandler(e.HandleEvaluateAlertCommand)     // LOGZ.IO GRAFANA CHANGE :: Add our own alerts handler
 	e.Bus.AddHandler(e.HandleEvaluateAlertByIdCommand) // LOGZ.IO GRAFANA CHANGE :: Add our own alerts by id handler
 
-	return nil
+	return e
 }
 
 func (e *AlertEvaluatorEngine) processJob(attemptID int, attemptChan chan int, cancelChan chan context.CancelFunc, job *Job) {
 	alertCtx, cancelFn := context.WithTimeout(context.Background(), setting.AlertingEvaluationTimeout)
 	cancelChan <- cancelFn
-	span := opentracing.StartSpan("alert execution")
-	alertCtx = opentracing.ContextWithSpan(alertCtx, span)
+	alertCtx, span := e.tracer.Start(alertCtx, "alert execution")
 
 	evalContext := NewEvalContext(alertCtx, job.Rule, job.EvalTime, e.RequestValidator) // LOGZ.IO GRAFANA CHANGE :: DEV-17927 - Add eval time
 	evalContext.Ctx = alertCtx
 
 	e.evalHandler.Eval(evalContext)
-	span.SetTag("alertId", evalContext.Rule.ID)
-	span.SetTag("dashboardId", evalContext.Rule.DashboardID)
-	span.SetTag("firing", evalContext.Firing)
-	span.SetTag("nodatapoints", evalContext.NoDataFound)
-	span.SetTag("attemptID", attemptID)
+	span.SetAttributes("alertId", evalContext.Rule.ID, attribute.Key("alertId").Int64(evalContext.Rule.ID))
+	span.SetAttributes("dashboardId", evalContext.Rule.DashboardID, attribute.Key("dashboardId").Int64(evalContext.Rule.DashboardID))
+	span.SetAttributes("firing", evalContext.Firing, attribute.Key("firing").Bool(evalContext.Firing))
+	span.SetAttributes("nodatapoints", evalContext.NoDataFound, attribute.Key("nodatapoints").Bool(evalContext.NoDataFound))
+	span.SetAttributes("attemptID", attemptID, attribute.Key("attemptID").Int(attemptID))
 
 	if evalContext.Error != nil {
-		ext.Error.Set(span, true)
-		span.LogFields(
-			tlog.Error(evalContext.Error),
-			tlog.String("message", "alerting execution attempt failed"),
-		)
+		span.RecordError(evalContext.Error)
+		span.AddEvents(
+			[]string{"error", "message"},
+			[]tracing.EventValue{
+				{Str: fmt.Sprintf("%v", evalContext.Error)},
+				{Str: "alerting execution attempt failed"},
+			})
 		// LOGZ.IO GRAFANA CHANGE :: DEV-17927 - remove retries
 	}
 
@@ -113,13 +116,13 @@ func (e *AlertEvaluatorEngine) processJob(attemptID int, attemptChan chan int, c
 
 	job.Result = evalContext // LOGZ.IO GRAFANA CHANGE :: DEV-17927 - Set the job result
 
-	span.Finish()
+	span.End()
 	e.log.Debug("Job Execution completed", "timeMs", evalContext.GetDurationMs(), "alertId", evalContext.Rule.ID, "name", evalContext.Rule.Name, "firing", evalContext.Firing, "attemptID", attemptID)
 	close(attemptChan)
 }
 
-func (e *AlertEvaluatorEngine) HandleEvaluateAlertCommand(cmd *EvaluateAlertCommand) error {
-	rule, err := NewRuleFromDBAlert(cmd.Alert, true)
+func (e *AlertEvaluatorEngine) HandleEvaluateAlertCommand(ctx context.Context, cmd *EvaluateAlertCommand) error {
+	rule, err := NewRuleFromDBAlert(ctx, cmd.Alert, true)
 	if err != nil {
 		e.log.Error("Could not build alert model for rule", "ruleId", cmd.Alert.Id, "error", err)
 		return nil
@@ -134,9 +137,9 @@ func (e *AlertEvaluatorEngine) HandleEvaluateAlertCommand(cmd *EvaluateAlertComm
 	return nil
 }
 
-func (e *AlertEvaluatorEngine) HandleEvaluateAlertByIdCommand(cmd *EvaluateAlertByIdCommand) error {
+func (e *AlertEvaluatorEngine) HandleEvaluateAlertByIdCommand(ctx context.Context, cmd *EvaluateAlertByIdCommand) error {
 	query := &models.GetAlertByIdQuery{Id: cmd.AlertId}
-	rule := e.ruleReader.fetchOne(query)
+	rule := e.ruleReader.fetchOne(ctx, query)
 	if rule == nil {
 		e.log.Error("Could not find alert rule", "ruleId", cmd.AlertId)
 		return nil
