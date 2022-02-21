@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"github.com/benbjohnson/clock"
+	"github.com/grafana/grafana/pkg/services/ngalert/eval"
 	"net/url"
 	"time"
 
@@ -112,4 +114,17 @@ func (api *API) RegisterAPIEndpoints(m *metrics.API) {
 			scheduler: api.Schedule,
 		},
 	), m)
+	// LOGZ.IO GRAFANA CHANGE :: DEV-30169,DEV-30170: add endpoints to evaluate and process alerts
+	api.RegisterLogzioAlertingApiEndpoints(NewLogzioAlertingApi(
+		NewLogzioAlertingService(proxy,
+			api.Cfg,
+			eval.Evaluator{Cfg: api.Cfg, Log: logger, DataSourceCache: api.DatasourceCache},
+			clock.New(),
+			api.ExpressionService,
+			api.StateManager,
+			api.MultiOrgAlertmanager,
+			logger,
+		),
+	), m)
+	// LOGZ.IO GRAFANA CHANGE :: end
 }
