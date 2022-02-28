@@ -14,6 +14,7 @@ import (
 	"github.com/grafana/grafana/pkg/services/ngalert/notifier"
 	"github.com/grafana/grafana/pkg/services/ngalert/schedule"
 	"github.com/grafana/grafana/pkg/services/ngalert/state"
+	"github.com/grafana/grafana/pkg/services/ngalert/store"
 	"github.com/grafana/grafana/pkg/setting"
 	"net/http"
 	"net/url"
@@ -34,6 +35,7 @@ type LogzioAlertingService struct {
 	ExpressionService    *expr.Service
 	StateManager         *state.Manager
 	MultiOrgAlertmanager *notifier.MultiOrgAlertmanager
+	InstanceStore        store.InstanceStore
 	Log                  log.Logger
 }
 
@@ -45,6 +47,7 @@ func NewLogzioAlertingService(
 	ExpressionService *expr.Service,
 	StateManager *state.Manager,
 	MultiOrgAlertmanager *notifier.MultiOrgAlertmanager,
+	InstanceStore store.InstanceStore,
 	log log.Logger,
 ) *LogzioAlertingService {
 	appUrl, err := url.Parse(Cfg.AppURL)
@@ -62,6 +65,7 @@ func NewLogzioAlertingService(
 		ExpressionService:    ExpressionService,
 		StateManager:         StateManager,
 		MultiOrgAlertmanager: MultiOrgAlertmanager,
+		InstanceStore:        InstanceStore,
 		Log:                  log,
 	}
 }
@@ -189,6 +193,25 @@ func apiRuleToDbAlertRule(api apimodels.ApiAlertRule) ngmodels.AlertRule {
 		For:             api.For,
 		Annotations:     api.Annotations,
 		Labels:          api.Labels,
+	}
+}
+
+func (srv *LogzioAlertingService) saveAlertStates(states []*state.State) {
+	srv.Log.Debug("saving alert states", "count", len(states))
+	for _, s := range states {
+		cmd := ngmodels.SaveAlertInstanceCommand{
+			RuleOrgID:         s.OrgID,
+			RuleUID:           s.AlertRuleUID,
+			Labels:            ngmodels.InstanceLabels(s.Labels),
+			State:             ngmodels.InstanceStateType(s.State.String()),
+			LastEvalTime:      s.LastEvaluationTime,
+			CurrentStateSince: s.StartsAt,
+			CurrentStateEnd:   s.EndsAt,
+		}
+		err := srv.InstanceStore.SaveAlertInstance(&cmd)
+		if err != nil {
+			srv.Log.Error("failed to save alert state", "uid", s.AlertRuleUID, "orgId", s.OrgID, "labels", s.Labels.String(), "state", s.State.String(), "msg", err.Error())
+		}
 	}
 }
 

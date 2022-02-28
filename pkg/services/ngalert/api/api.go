@@ -123,6 +123,7 @@ func (api *API) RegisterAPIEndpoints(m *metrics.API) {
 			api.ExpressionService,
 			api.StateManager,
 			api.MultiOrgAlertmanager,
+			api.InstanceStore,
 			logger,
 		),
 	), m)
