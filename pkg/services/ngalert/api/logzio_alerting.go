@@ -104,6 +104,7 @@ func (srv *LogzioAlertingService) RouteProcessAlert(request apimodels.AlertProce
 	}
 
 	processedStates := srv.StateManager.ProcessEvalResults(context.Background(), &alertRule, evalResults)
+	srv.saveAlertStates(processedStates)
 	alerts := schedule.FromAlertStateToPostableAlerts(processedStates, srv.StateManager, srv.AppUrl)
 
 	n, err := srv.MultiOrgAlertmanager.AlertmanagerFor(alertRule.OrgID)
