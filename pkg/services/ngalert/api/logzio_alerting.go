@@ -141,7 +141,7 @@ func (srv *LogzioAlertingService) RouteMigrateOrg(orgId int64) response.Response
 		return response.Error(http.StatusInternalServerError, "Failed to run alert migration", err)
 	}
 
-	if err := srv.Migrator.RunMigration(&ualert.UpdateOrgDashboardUIDPanelIDMigration{}); err != nil {
+	if err := srv.Migrator.RunMigration(&ualert.UpdateOrgDashboardUIDPanelIDMigration{OrgId: orgId}); err != nil {
 		srv.Log.Error("Failed to run update dashboard uuid and panel ID migration", "orgId", orgId, "err", err)
 		return response.Error(http.StatusInternalServerError, "Failed to run update dashboard uuid and panel ID migration", err)
 	}

@@ -1176,6 +1176,7 @@ func (m *MigrateOrgAlerts) writeSilencesFile(orgID int64) error {
 // from the __dashboardUid__ and __panelId__ annotations.
 type UpdateOrgDashboardUIDPanelIDMigration struct {
 	migrator.MigrationBase
+	OrgId int64
 }
 
 func (m *UpdateOrgDashboardUIDPanelIDMigration) SQL(_ migrator.Dialect) string {
@@ -1187,7 +1188,7 @@ func (m *UpdateOrgDashboardUIDPanelIDMigration) Exec(sess *xorm.Session, mg *mig
 		ID          int64             `xorm:"id"`
 		Annotations map[string]string `xorm:"annotations"`
 	}
-	if err := sess.SQL(`SELECT id, annotations FROM alert_rule`).Find(&results); err != nil {
+	if err := sess.SQL(`SELECT id, annotations FROM alert_rule WHERE org_id = ?`, m.OrgId).Find(&results); err != nil {
 		return fmt.Errorf("failed to get annotations for all alert rules: %w", err)
 	}
 	for _, next := range results {
