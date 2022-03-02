@@ -2,6 +2,7 @@ package api
 
 // LOGZ.IO GRAFANA CHANGE :: DEV-30169,DEV-30170: add endpoints to evaluate and process alerts
 import (
+	"cuelang.org/go/pkg/strconv"
 	"github.com/grafana/grafana/pkg/api/response"
 	"github.com/grafana/grafana/pkg/api/routing"
 	"github.com/grafana/grafana/pkg/models"
@@ -40,6 +41,14 @@ func (api *LogzioAlertingApi) RouteProcessAlert(ctx *models.ReqContext) response
 	return api.service.RouteProcessAlert(body)
 }
 
+func (api *LogzioAlertingApi) RouteMigrateOrg(ctx *models.ReqContext) response.Response {
+	if orgId, err := strconv.ParseInt(web.Params(ctx.Req)[":OrgId"], 10, 64); err != nil {
+		return response.Error(http.StatusBadRequest, "invalid format of org ID", err)
+	} else {
+		return api.service.RouteMigrateOrg(orgId)
+	}
+}
+
 func (api *API) RegisterLogzioAlertingApiEndpoints(srv *LogzioAlertingApi, m *metrics.API) {
 	api.RouteRegister.Group("", func(group routing.RouteRegister) {
 		group.Post(
@@ -57,6 +66,15 @@ func (api *API) RegisterLogzioAlertingApiEndpoints(srv *LogzioAlertingApi, m *me
 				http.MethodPost,
 				"/internal/alert/api/v1/process",
 				srv.RouteProcessAlert,
+				m,
+			),
+		)
+		group.Post(
+			toMacaronPath("/internal/alert/api/v1/migrate-org/{OrgId}"),
+			metrics.Instrument(
+				http.MethodPost,
+				"/internal/alert/api/v1/migrate-org/{OrgId}",
+				srv.RouteMigrateOrg,
 				m,
 			),
 		)
