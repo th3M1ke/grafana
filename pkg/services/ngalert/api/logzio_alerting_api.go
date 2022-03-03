@@ -2,7 +2,6 @@ package api
 
 // LOGZ.IO GRAFANA CHANGE :: DEV-30169,DEV-30170: add endpoints to evaluate and process alerts
 import (
-	"cuelang.org/go/pkg/strconv"
 	"github.com/grafana/grafana/pkg/api/response"
 	"github.com/grafana/grafana/pkg/api/routing"
 	"github.com/grafana/grafana/pkg/models"
@@ -14,6 +13,10 @@ import (
 
 type LogzioAlertingApi struct {
 	service *LogzioAlertingService
+}
+
+type RunMigrationForOrg struct {
+	OrgId int64 `json:"orgId"`
 }
 
 // NewLogzioAlertingApi creates a new LogzioAlertingApi instance
@@ -42,11 +45,23 @@ func (api *LogzioAlertingApi) RouteProcessAlert(ctx *models.ReqContext) response
 }
 
 func (api *LogzioAlertingApi) RouteMigrateOrg(ctx *models.ReqContext) response.Response {
-	if orgId, err := strconv.ParseInt(web.Params(ctx.Req)[":OrgId"], 10, 64); err != nil {
-		return response.Error(http.StatusBadRequest, "invalid format of org ID", err)
-	} else {
-		return api.service.RouteMigrateOrg(orgId)
+	body := RunMigrationForOrg{}
+
+	if err := web.Bind(ctx.Req, &body); err != nil {
+		return response.Error(http.StatusBadRequest, "bad request data", err)
 	}
+
+	return api.service.RouteMigrateOrg(body)
+}
+
+func (api *LogzioAlertingApi) RouteClearOrgMigration(ctx *models.ReqContext) response.Response {
+	body := RunMigrationForOrg{}
+
+	if err := web.Bind(ctx.Req, &body); err != nil {
+		return response.Error(http.StatusBadRequest, "bad request data", err)
+	}
+
+	return api.service.RouteClearOrgMigration(body)
 }
 
 func (api *API) RegisterLogzioAlertingApiEndpoints(srv *LogzioAlertingApi, m *metrics.API) {
@@ -70,11 +85,20 @@ func (api *API) RegisterLogzioAlertingApiEndpoints(srv *LogzioAlertingApi, m *me
 			),
 		)
 		group.Post(
-			toMacaronPath("/internal/alert/api/v1/migrate-org/{OrgId}"),
+			toMacaronPath("/internal/alert/api/v1/migrate-org"),
 			metrics.Instrument(
 				http.MethodPost,
-				"/internal/alert/api/v1/migrate-org/{OrgId}",
+				"/internal/alert/api/v1/migrate-org",
 				srv.RouteMigrateOrg,
+				m,
+			),
+		)
+		group.Post(
+			toMacaronPath("/internal/alert/api/v1/clear-org-migration"),
+			metrics.Instrument(
+				http.MethodPost,
+				"/internal/alert/api/v1/clear-org-migration",
+				srv.RouteClearOrgMigration,
 				m,
 			),
 		)

@@ -28,7 +28,10 @@ import (
 )
 
 // LOGZ.IO GRAFANA CHANGE :: DEV-30705 - Add endpoint to migrate alerts of organization
-var getDashboardAlertsSql = `
+const contactPointNameSeparator = "&"
+const contactPointMaxLength = 255
+
+const getDashboardAlertsSql = `
 SELECT id,
 	org_id,
 	dashboard_id,
@@ -55,7 +58,6 @@ type MigrateOrgAlerts struct {
 	migratedChannelsPerOrg    map[int64]map[*notificationChannel]struct{}
 	silences                  map[int64][]*pb.MeshSilence
 	portedChannelGroupsPerOrg map[int64]map[string]string // Org -> Channel group key -> receiver name.
-	lastReceiverID            int                         // For the auto generated receivers.
 	orgId                     int64
 }
 
@@ -281,7 +283,7 @@ func (m *MigrateOrgAlerts) Exec(sess *xorm.Session, mg *migrator.Migrator) error
 // Additionally it unmarshals the json settings for the alert into the
 // ParsedSettings property of the dash alert.
 func (m *MigrateOrgAlerts) slurpDashAlerts() ([]dashAlert, error) {
-	dashAlerts := []dashAlert{}
+	var dashAlerts []dashAlert
 
 	err := m.sess.SQL(fmt.Sprintf(getDashboardAlertsSql, m.mg.Dialect.Quote("for")), m.orgId).Find(&dashAlerts)
 
@@ -301,11 +303,11 @@ func (m *MigrateOrgAlerts) slurpDashAlerts() ([]dashAlert, error) {
 
 // slurpDSIDs returns a map of [orgID, dataSourceId] -> UID.
 func (m *MigrateOrgAlerts) slurpDSIDs() (dsUIDLookup, error) {
-	dsIDs := []struct {
+	var dsIDs []struct {
 		OrgID int64  `xorm:"org_id"`
 		ID    int64  `xorm:"id"`
 		UID   string `xorm:"uid"`
-	}{}
+	}
 
 	err := m.sess.SQL(`SELECT org_id, id, uid FROM data_source WHERE org_id = ?`, m.orgId).Find(&dsIDs)
 
@@ -324,11 +326,11 @@ func (m *MigrateOrgAlerts) slurpDSIDs() (dsUIDLookup, error) {
 
 // slurpDashUIDs returns a map of [orgID, dashboardId] -> dashUID.
 func (m *MigrateOrgAlerts) slurpDashUIDs() (map[[2]int64]string, error) {
-	dashIDs := []struct {
+	var dashIDs []struct {
 		OrgID int64  `xorm:"org_id"`
 		ID    int64  `xorm:"id"`
 		UID   string `xorm:"uid"`
-	}{}
+	}
 
 	err := m.sess.SQL(`SELECT org_id, id, uid FROM dashboard WHERE org_id = ?`, m.orgId).Find(&dashIDs)
 
@@ -361,7 +363,7 @@ func (m *MigrateOrgAlerts) getNotificationChannelMap() (channelsPerOrg, defaultC
 	WHERE
 		org_id = ?
 	`
-	allChannels := []notificationChannel{}
+	var allChannels []notificationChannel
 	err := m.sess.SQL(q, m.orgId).Find(&allChannels)
 	if err != nil {
 		return nil, nil, err
@@ -423,7 +425,7 @@ func (m *MigrateOrgAlerts) addDefaultChannels(amConfigsPerOrg amConfigsPerOrg, a
 }
 
 func (m *MigrateOrgAlerts) makeReceiverAndRoute(ruleUid string, orgID int64, channelUids []interface{}, defaultChannels []*notificationChannel, allChannels map[interface{}]*notificationChannel) (*PostableApiReceiver, *Route, error) {
-	portedChannels := []*PostableGrafanaReceiver{}
+	var portedChannels []*PostableGrafanaReceiver
 	var receiver *PostableApiReceiver
 
 	addChannel := func(c *notificationChannel) error {
@@ -514,8 +516,7 @@ func (m *MigrateOrgAlerts) makeReceiverAndRoute(ruleUid string, orgID int64, cha
 		if ruleUid == "default_route" {
 			receiverName = "autogen-contact-point-default"
 		} else {
-			m.lastReceiverID++
-			receiverName = fmt.Sprintf("autogen-contact-point-%d", m.lastReceiverID)
+			receiverName = generateContactPointName(portedChannels)
 		}
 
 		m.portedChannelGroupsPerOrg[orgID][chanKey] = receiverName
@@ -536,6 +537,21 @@ func (m *MigrateOrgAlerts) makeReceiverAndRoute(ruleUid string, orgID int64, cha
 	}
 
 	return receiver, route, nil
+}
+
+func generateContactPointName(channels []*PostableGrafanaReceiver) string {
+	var channelNames []string
+
+	for _, c := range channels {
+		channelNames = append(channelNames, c.Name)
+	}
+
+	contactPointName := strings.Join(channelNames, contactPointNameSeparator)
+
+	if len(contactPointName) > contactPointMaxLength {
+		return contactPointName[:contactPointMaxLength] + "..."
+	}
+	return contactPointName
 }
 
 func (m *MigrateOrgAlerts) generateChannelUID() (string, bool) {
@@ -993,7 +1009,7 @@ func (m *MigrateOrgAlerts) updateReceiverAndRoute(allChannels channelsPerOrg, de
 
 func (m *MigrateOrgAlerts) addUnmigratedChannels(orgID int64, amConfigs *PostableUserConfig, allChannels map[interface{}]*notificationChannel) error {
 	// Unmigrated channels.
-	portedChannels := []*PostableGrafanaReceiver{}
+	var portedChannels []*PostableGrafanaReceiver
 	receiver := &PostableApiReceiver{
 		Name: "autogen-unlinked-channel-recv",
 	}

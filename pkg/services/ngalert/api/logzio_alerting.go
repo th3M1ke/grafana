@@ -133,17 +133,28 @@ func (srv *LogzioAlertingService) RouteProcessAlert(request apimodels.AlertProce
 	return response.JSONStreaming(http.StatusOK, alerts)
 }
 
-func (srv *LogzioAlertingService) RouteMigrateOrg(orgId int64) response.Response {
-	alertMigration := ualert.NewOrgAlertMigration(orgId)
+func (srv *LogzioAlertingService) RouteMigrateOrg(request RunMigrationForOrg) response.Response {
+	alertMigration := ualert.NewOrgAlertMigration(request.OrgId)
 
 	if err := srv.Migrator.RunMigration(alertMigration); err != nil {
-		srv.Log.Error("Failed to run alert migration", "orgId", orgId, "err", err)
+		srv.Log.Error("Failed to run alert migration", "orgId", request.OrgId, "err", err)
 		return response.Error(http.StatusInternalServerError, "Failed to run alert migration", err)
 	}
 
-	if err := srv.Migrator.RunMigration(&ualert.UpdateOrgDashboardUIDPanelIDMigration{OrgId: orgId}); err != nil {
-		srv.Log.Error("Failed to run update dashboard uuid and panel ID migration", "orgId", orgId, "err", err)
+	if err := srv.Migrator.RunMigration(&ualert.UpdateOrgDashboardUIDPanelIDMigration{OrgId: request.OrgId}); err != nil {
+		srv.Log.Error("Failed to run update dashboard uuid and panel ID migration", "orgId", request.OrgId, "err", err)
 		return response.Error(http.StatusInternalServerError, "Failed to run update dashboard uuid and panel ID migration", err)
+	}
+
+	return response.JSONStreaming(http.StatusOK, "Success")
+}
+
+func (srv *LogzioAlertingService) RouteClearOrgMigration(requestBody RunMigrationForOrg) response.Response {
+	migration := &ualert.RmOrgAlertMigration{OrgId: requestBody.OrgId}
+
+	if err := srv.Migrator.RunMigration(migration); err != nil {
+		srv.Log.Error("Failed to run clear alert migration", "orgId", requestBody.OrgId, "err", err)
+		return response.Error(http.StatusInternalServerError, "Failed to run clear alert migration", err)
 	}
 
 	return response.JSONStreaming(http.StatusOK, "Success")
