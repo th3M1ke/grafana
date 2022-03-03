@@ -8,7 +8,7 @@ import (
 
 // LOGZ.IO GRAFANA CHANGE :: DEV-30705 - Add endpoint to migrate alerts of organization
 
-// RmOrgAlertMigration removes Grafana 8 alert data
+// RmOrgAlertMigration removes Grafana 8 alert data. Based on ualert.rmMigration code
 type RmOrgAlertMigration struct {
 	migrator.MigrationBase
 	OrgId int64

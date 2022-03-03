@@ -48,6 +48,7 @@ FROM
 WHERE org_id = ?
 `
 
+//MigrateOrgAlerts migrates old (pre Grafana 8 alerts) to new unified alerts with corresponding notification policies. Based on ualert.migration
 type MigrateOrgAlerts struct {
 	migrator.MigrationBase
 	// session and mg are attached for convenience.
@@ -1189,7 +1190,7 @@ func (m *MigrateOrgAlerts) writeSilencesFile(orgID int64) error {
 }
 
 // UpdateOrgDashboardUIDPanelIDMigration sets the dashboard_uid and panel_id columns
-// from the __dashboardUid__ and __panelId__ annotations.
+// from the __dashboardUid__ and __panelId__ annotations. Based on ualert.updateDashboardUIDPanelIDMigration
 type UpdateOrgDashboardUIDPanelIDMigration struct {
 	migrator.MigrationBase
 	OrgId int64
