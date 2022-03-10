@@ -160,6 +160,7 @@ func (ng *AlertNG) init() error {
 		AdminConfigStore:     store,
 		MultiOrgAlertmanager: ng.MultiOrgAlertmanager,
 		StateManager:         ng.stateManager,
+		SQLStore:             ng.SQLStore,
 	}
 	api.RegisterAPIEndpoints(ng.Metrics.GetAPIMetrics())
 
