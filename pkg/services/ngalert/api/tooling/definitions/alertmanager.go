@@ -401,14 +401,20 @@ type ApiAlertRule struct {
 }
 
 type ApiEvalResult struct {
-	Instance           data.Labels                        `json:"instance"`
-	State              eval.State                         `json:"state"`
-	StateName          string                             `json:"stateName"`
-	Error              *ApiEvalError                      `json:"error"`
-	EvaluatedAt        time.Time                          `json:"evaluatedAt"`
-	EvaluationDuration time.Duration                      `json:"evaluationDuration"`
-	EvaluationString   string                             `json:"evaluationString"`
-	Values             map[string]eval.NumberValueCapture `json:"values"`
+	Instance           data.Labels                      `json:"instance"`
+	State              eval.State                       `json:"state"`
+	StateName          string                           `json:"stateName"`
+	Error              *ApiEvalError                    `json:"error"`
+	EvaluatedAt        time.Time                        `json:"evaluatedAt"`
+	EvaluationDuration time.Duration                    `json:"evaluationDuration"`
+	EvaluationString   string                           `json:"evaluationString"`
+	Values             map[string]ApiNumberValueCapture `json:"values"`
+}
+
+type ApiNumberValueCapture struct {
+	Var    string      `json:"var"`
+	Labels data.Labels `json:"labels"`
+	Value  *float64    `json:"value"`
 }
 
 type ApiEvalError struct {

@@ -135,7 +135,13 @@ func evaluationResultsToApi(evalResult eval.Result) apimodels.ApiEvalResult {
 		EvaluatedAt:        evalResult.EvaluatedAt,
 		EvaluationDuration: evalResult.EvaluationDuration,
 		EvaluationString:   evalResult.EvaluationString,
-		Values:             evalResult.Values,
+	}
+
+	if evalResult.Values != nil {
+		apiEvalResult.Values = make(map[string]apimodels.ApiNumberValueCapture, len(evalResult.Values))
+		for k, v := range evalResult.Values {
+			apiEvalResult.Values[k] = valueNumberCaptureToApi(v)
+		}
 	}
 
 	if evalResult.Error != nil {
@@ -168,7 +174,14 @@ func apiToEvaluationResult(apiEvalResult apimodels.ApiEvalResult) eval.Result {
 		State:              apiEvalResult.State,
 		EvaluatedAt:        apiEvalResult.EvaluatedAt,
 		EvaluationDuration: apiEvalResult.EvaluationDuration,
-		Values:             apiEvalResult.Values,
+	}
+
+	if apiEvalResult.Values != nil {
+		evalResult.Values = make(map[string]eval.NumberValueCapture, len(apiEvalResult.Values))
+
+		for k, v := range apiEvalResult.Values {
+			evalResult.Values[k] = apiToNumberValueCapture(v)
+		}
 	}
 
 	return evalResult
@@ -194,6 +207,22 @@ func apiRuleToDbAlertRule(api apimodels.ApiAlertRule) ngmodels.AlertRule {
 		For:             api.For,
 		Annotations:     api.Annotations,
 		Labels:          api.Labels,
+	}
+}
+
+func apiToNumberValueCapture(api apimodels.ApiNumberValueCapture) eval.NumberValueCapture {
+	return eval.NumberValueCapture{
+		Var:    api.Var,
+		Labels: api.Labels,
+		Value:  api.Value,
+	}
+}
+
+func valueNumberCaptureToApi(numberValueCapture eval.NumberValueCapture) apimodels.ApiNumberValueCapture {
+	return apimodels.ApiNumberValueCapture{
+		Var:    numberValueCapture.Var,
+		Labels: numberValueCapture.Labels,
+		Value:  numberValueCapture.Value,
 	}
 }
 
