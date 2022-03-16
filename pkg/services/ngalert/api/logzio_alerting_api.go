@@ -15,6 +15,10 @@ type LogzioAlertingApi struct {
 	service *LogzioAlertingService
 }
 
+type RunMigrationForOrg struct {
+	OrgId int64 `json:"orgId"`
+}
+
 // NewLogzioAlertingApi creates a new LogzioAlertingApi instance
 func NewLogzioAlertingApi(service *LogzioAlertingService) *LogzioAlertingApi {
 	return &LogzioAlertingApi{
@@ -40,6 +44,26 @@ func (api *LogzioAlertingApi) RouteProcessAlert(ctx *models.ReqContext) response
 	return api.service.RouteProcessAlert(body)
 }
 
+func (api *LogzioAlertingApi) RouteMigrateOrg(ctx *models.ReqContext) response.Response {
+	body := RunMigrationForOrg{}
+
+	if err := web.Bind(ctx.Req, &body); err != nil {
+		return response.Error(http.StatusBadRequest, "bad request data", err)
+	}
+
+	return api.service.RouteMigrateOrg(body)
+}
+
+func (api *LogzioAlertingApi) RouteClearOrgMigration(ctx *models.ReqContext) response.Response {
+	body := RunMigrationForOrg{}
+
+	if err := web.Bind(ctx.Req, &body); err != nil {
+		return response.Error(http.StatusBadRequest, "bad request data", err)
+	}
+
+	return api.service.RouteClearOrgMigration(body)
+}
+
 func (api *API) RegisterLogzioAlertingApiEndpoints(srv *LogzioAlertingApi, m *metrics.API) {
 	api.RouteRegister.Group("", func(group routing.RouteRegister) {
 		group.Post(
@@ -57,6 +81,24 @@ func (api *API) RegisterLogzioAlertingApiEndpoints(srv *LogzioAlertingApi, m *me
 				http.MethodPost,
 				"/internal/alert/api/v1/process",
 				srv.RouteProcessAlert,
+				m,
+			),
+		)
+		group.Post(
+			toMacaronPath("/internal/alert/api/v1/migrate-org"),
+			metrics.Instrument(
+				http.MethodPost,
+				"/internal/alert/api/v1/migrate-org",
+				srv.RouteMigrateOrg,
+				m,
+			),
+		)
+		group.Post(
+			toMacaronPath("/internal/alert/api/v1/clear-org-migration"),
+			metrics.Instrument(
+				http.MethodPost,
+				"/internal/alert/api/v1/clear-org-migration",
+				srv.RouteClearOrgMigration,
 				m,
 			),
 		)

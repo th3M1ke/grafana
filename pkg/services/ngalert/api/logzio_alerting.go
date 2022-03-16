@@ -15,6 +15,9 @@ import (
 	"github.com/grafana/grafana/pkg/services/ngalert/schedule"
 	"github.com/grafana/grafana/pkg/services/ngalert/state"
 	"github.com/grafana/grafana/pkg/services/ngalert/store"
+	"github.com/grafana/grafana/pkg/services/sqlstore"
+	"github.com/grafana/grafana/pkg/services/sqlstore/migrations/ualert"
+	"github.com/grafana/grafana/pkg/services/sqlstore/migrator"
 	"github.com/grafana/grafana/pkg/setting"
 	"net/http"
 	"net/url"
@@ -37,6 +40,7 @@ type LogzioAlertingService struct {
 	MultiOrgAlertmanager *notifier.MultiOrgAlertmanager
 	InstanceStore        store.InstanceStore
 	Log                  log.Logger
+	Migrator             *migrator.Migrator
 }
 
 func NewLogzioAlertingService(
@@ -49,6 +53,7 @@ func NewLogzioAlertingService(
 	MultiOrgAlertmanager *notifier.MultiOrgAlertmanager,
 	InstanceStore store.InstanceStore,
 	log log.Logger,
+	SQLStore *sqlstore.SQLStore,
 ) *LogzioAlertingService {
 	appUrl, err := url.Parse(Cfg.AppURL)
 	if err != nil {
@@ -67,6 +72,7 @@ func NewLogzioAlertingService(
 		MultiOrgAlertmanager: MultiOrgAlertmanager,
 		InstanceStore:        InstanceStore,
 		Log:                  log,
+		Migrator:             SQLStore.BuildMigrator(),
 	}
 }
 
@@ -125,6 +131,33 @@ func (srv *LogzioAlertingService) RouteProcessAlert(request apimodels.AlertProce
 	}
 
 	return response.JSONStreaming(http.StatusOK, alerts)
+}
+
+func (srv *LogzioAlertingService) RouteMigrateOrg(request RunMigrationForOrg) response.Response {
+	alertMigration := ualert.NewOrgAlertMigration(request.OrgId)
+
+	if err := srv.Migrator.RunMigration(alertMigration); err != nil {
+		srv.Log.Error("Failed to run alert migration", "orgId", request.OrgId, "err", err)
+		return response.Error(http.StatusInternalServerError, "Failed to run alert migration", err)
+	}
+
+	if err := srv.Migrator.RunMigration(&ualert.UpdateOrgDashboardUIDPanelIDMigration{OrgId: request.OrgId}); err != nil {
+		srv.Log.Error("Failed to run update dashboard uuid and panel ID migration", "orgId", request.OrgId, "err", err)
+		return response.Error(http.StatusInternalServerError, "Failed to run update dashboard uuid and panel ID migration", err)
+	}
+
+	return response.JSONStreaming(http.StatusOK, "Success")
+}
+
+func (srv *LogzioAlertingService) RouteClearOrgMigration(requestBody RunMigrationForOrg) response.Response {
+	migration := &ualert.RmOrgAlertMigration{OrgId: requestBody.OrgId}
+
+	if err := srv.Migrator.RunMigration(migration); err != nil {
+		srv.Log.Error("Failed to run clear alert migration", "orgId", requestBody.OrgId, "err", err)
+		return response.Error(http.StatusInternalServerError, "Failed to run clear alert migration", err)
+	}
+
+	return response.JSONStreaming(http.StatusOK, "Success")
 }
 
 func evaluationResultsToApi(evalResult eval.Result) apimodels.ApiEvalResult {
