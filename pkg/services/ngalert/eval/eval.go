@@ -5,6 +5,7 @@ package eval
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"runtime/debug"
 	"sort"
 	"strconv"
@@ -119,6 +120,7 @@ type AlertExecCtx struct {
 	OrgID              int64
 	ExpressionsEnabled bool
 	Log                log.Logger
+	headers            http.Header // LOGZ.IO GRAFANA CHANGE :: Upgrade to 8.4.0
 
 	Ctx context.Context
 }
@@ -133,6 +135,10 @@ func GetExprRequest(ctx AlertExecCtx, data []models.AlertQuery, now time.Time, d
 			"X-Cache-Skip": "true",
 		},
 	}
+
+	for k, v := range ctx.headers { // LOGZ.IO GRAFANA CHANGE :: Upgrade to 8.4.0
+		req.Headers[k] = v[0] // LOGZ.IO GRAFANA CHANGE :: Upgrade to 8.4.0
+	} // LOGZ.IO GRAFANA CHANGE :: Upgrade to 8.4.0
 
 	datasources := make(map[string]*m.DataSource, len(data))
 
@@ -534,11 +540,11 @@ func (e *Evaluator) ConditionEval(condition *models.Condition, now time.Time, ex
 }
 
 // QueriesAndExpressionsEval executes queries and expressions and returns the result.
-func (e *Evaluator) QueriesAndExpressionsEval(orgID int64, data []models.AlertQuery, now time.Time, expressionService *expr.Service) (*backend.QueryDataResponse, error) {
+func (e *Evaluator) QueriesAndExpressionsEval(orgID int64, data []models.AlertQuery, now time.Time, expressionService *expr.Service, logzIoHeaders http.Header) (*backend.QueryDataResponse, error) { // LOGZ.IO GRAFANA CHANGE :: Upgrade to 8.4.0
 	alertCtx, cancelFn := context.WithTimeout(context.Background(), e.Cfg.UnifiedAlerting.EvaluationTimeout)
 	defer cancelFn()
 
-	alertExecCtx := AlertExecCtx{OrgID: orgID, Ctx: alertCtx, ExpressionsEnabled: e.Cfg.ExpressionsEnabled, Log: e.Log}
+	alertExecCtx := AlertExecCtx{OrgID: orgID, Ctx: alertCtx, ExpressionsEnabled: e.Cfg.ExpressionsEnabled, Log: e.Log, headers: logzIoHeaders} // LOGZ.IO GRAFANA CHANGE :: Upgrade to 8.4.0
 
 	execResult, err := executeQueriesAndExpressions(alertExecCtx, data, now, expressionService, e.DataSourceCache)
 	if err != nil {
