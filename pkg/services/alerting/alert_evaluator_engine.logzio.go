@@ -56,7 +56,11 @@ type EvaluateAlertByIdCommand struct {
 func ProvideAlertEvaluatorEngine(renderer rendering.Service, bus bus.Bus, requestValidator models.PluginRequestValidator,
 	dataService legacydata.RequestHandler, usageStatsService usagestats.Service, encryptionService encryption.Internal,
 	cfg *setting.Cfg, tracer tracing.Tracer) *AlertEvaluatorEngine {
-	e := &AlertEvaluatorEngine{}
+	e := &AlertEvaluatorEngine{ // LOGZ.IO GRAFANA CHANGE :: Upgrade to 8.4.0
+		tracer:           tracer,           // LOGZ.IO GRAFANA CHANGE :: Upgrade to 8.4.0
+		RequestValidator: requestValidator, // LOGZ.IO GRAFANA CHANGE :: Upgrade to 8.4.0
+		DataService:      dataService,      // LOGZ.IO GRAFANA CHANGE :: Upgrade to 8.4.0
+	} // LOGZ.IO GRAFANA CHANGE :: Upgrade to 8.4.0
 	e.evalHandler = NewEvalHandler(e.DataService)
 	e.ruleReader = newRuleReader()
 	e.log = log.New("check-alerting.engine")

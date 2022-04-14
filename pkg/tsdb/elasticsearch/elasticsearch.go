@@ -14,7 +14,6 @@ import (
 	"github.com/grafana/grafana/pkg/infra/log"
 	es "github.com/grafana/grafana/pkg/tsdb/elasticsearch/client"
 	"github.com/grafana/grafana/pkg/tsdb/intervalv2"
-	"github.com/grafana/grafana/pkg/tsdb/legacydata"
 )
 
 var eslog = log.New("tsdb.elasticsearch")
@@ -35,7 +34,7 @@ func ProvideService(httpClientProvider httpclient.Provider) *Service {
 	}
 }
 
-func (s *Service) QueryData(ctx context.Context, req *backend.QueryDataRequest, tsdbQuery legacydata.DataQuery) (*backend.QueryDataResponse, error) {
+func (s *Service) QueryData(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
 	if len(req.Queries) == 0 {
 		return &backend.QueryDataResponse{}, fmt.Errorf("query contains no queries")
 	}
@@ -45,8 +44,7 @@ func (s *Service) QueryData(ctx context.Context, req *backend.QueryDataRequest, 
 		return &backend.QueryDataResponse{}, err
 	}
 
-	client, err := es.NewClient(ctx, s.httpClientProvider, dsInfo, req.Queries[0].TimeRange, &tsdbQuery) // LOGZ.IO GRAFANA CHANGE :: (ALERTS) DEV-16492 Support external alert evaluation
-
+	client, err := es.NewClient(context.WithValue(ctx, "logzioHeaders", req.Headers), s.httpClientProvider, dsInfo, req.Queries[0].TimeRange) // LOGZ.IO :: Upgrade to 8.4.0
 	if err != nil {
 		return &backend.QueryDataResponse{}, err
 	}

@@ -22,7 +22,6 @@ import (
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/models"
 	"github.com/grafana/grafana/pkg/tsdb/intervalv2"
-	"github.com/grafana/grafana/pkg/tsdb/legacydata"
 
 	"golang.org/x/net/context/ctxhttp"
 )
@@ -62,7 +61,7 @@ type Client interface {
 }
 
 // NewClient creates a new elasticsearch client
-var NewClient = func(ctx context.Context, httpClientProvider httpclient.Provider, ds *DatasourceInfo, timeRange backend.TimeRange, tsdbQuery *legacydata.DataQuery) (Client, error) { // LOGZ.IO GRAFANA CHANGE :: (ALERTS) DEV-16492 Support external alert evaluation
+var NewClient = func(ctx context.Context, httpClientProvider httpclient.Provider, ds *DatasourceInfo, timeRange backend.TimeRange) (Client, error) {
 	ip, err := newIndexPattern(ds.Interval, ds.Database)
 	if err != nil {
 		return nil, err
@@ -75,6 +74,17 @@ var NewClient = func(ctx context.Context, httpClientProvider httpclient.Provider
 
 	clientLog.Debug("Creating new client", "version", ds.ESVersion, "timeField", ds.TimeField, "indices", strings.Join(indices, ", "))
 
+	// LOGZ.IO GRAFANA CHANGE :: Upgrade to 8.4.0 start
+	logzIoHeaders := &models.LogzIoHeaders{}
+	headers := ctx.Value("logzioHeaders")
+	if headers != nil {
+		logzIoHeaders.RequestHeaders = http.Header{}
+		for key, value := range headers.(map[string]string) {
+			logzIoHeaders.RequestHeaders.Set(key, value)
+		}
+	}
+	// LOGZ.IO GRAFANA CHANGE :: Upgrade to 8.4.0 end
+
 	return &baseClientImpl{
 		ctx:                ctx,
 		httpClientProvider: httpClientProvider,
@@ -83,7 +93,7 @@ var NewClient = func(ctx context.Context, httpClientProvider httpclient.Provider
 		timeField:          ds.TimeField,
 		indices:            indices,
 		timeRange:          timeRange,
-		logzIoHeaders:      tsdbQuery.LogzIoHeaders, // LOGZ.IO GRAFANA CHANGE :: (ALERTS) DEV-16492 Support external alert evaluation
+		logzIoHeaders:      logzIoHeaders, // LOGZ.IO GRAFANA CHANGE :: (ALERTS) DEV-16492 Support external alert evaluation
 	}, nil
 }
 
@@ -332,7 +342,8 @@ func (c *baseClientImpl) getMultiSearchQueryParameters() string {
 	q, _ := url.ParseQuery(datasourceUrl.RawQuery)
 	if len(q.Get("querySource")) > 0 {
 		// set/override 'accountsToSearch' as Database (accountId)
-		qs = append(qs, fmt.Sprintf("accountsToSearch=%d", c.ds.Database))
+		qs = append(qs, fmt.Sprintf("accountsToSearch=%s", c.ds.Database))
+		qs = append(qs, "querySource=INTERNAL_METRICS_ALERTS")
 	}
 	// LOGZ.IO end
 

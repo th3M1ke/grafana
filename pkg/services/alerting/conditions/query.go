@@ -181,7 +181,12 @@ func (c *QueryCondition) executeQuery(context *alerting.EvalContext, timeRange l
 	if err != nil {
 		return nil, fmt.Errorf("interval calculation failed: %w", err)
 	}
-	// req.LogzIoHeaders = context.Rule.LogzIoHeaders // LOGZ.IO GRAFANA CHANGE :: (ALERTS) DEV-16492 Support external alert evaluation
+
+	for k, v := range context.Rule.LogzIoHeaders.RequestHeaders { // LOGZ.IO GRAFANA CHANGE :: Upgrade
+		req.Headers[k] = v[0] // LOGZ.IO GRAFANA CHANGE :: Upgrade
+	} // LOGZ.IO GRAFANA CHANGE :: Upgrade
+
+	req.LogzIoHeaders = context.Rule.LogzIoHeaders
 	result := make(legacydata.DataTimeSeriesSlice, 0)
 
 	if context.IsDebug {
